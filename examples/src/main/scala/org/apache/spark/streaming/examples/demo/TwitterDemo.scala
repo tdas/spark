@@ -17,7 +17,8 @@ object TwitterDemo {
     val Array(master, IntParam(numStreams), checkpointPath) = args
 
     // Create the StreamingContext
-    val ssc = new StreamingContext(master, "TwitterDemo", Seconds(1))
+    val ssc = new StreamingContext(master, "TwitterDemo", Seconds(1),
+      System.getenv("SPARK_HOME"), Seq(System.getenv("SPARK_EXAMPLES_JAR")))
     ssc.checkpoint(checkpointPath)
 
     // Create the streams of tweets
