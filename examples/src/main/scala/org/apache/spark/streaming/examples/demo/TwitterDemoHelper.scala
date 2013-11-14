@@ -40,9 +40,12 @@ object TwitterDemoHelper {
       "2155676874-T3WPsHNkz3jqdPPUFx6H2yH5u1X4wapNDBRwi8M", "zd03Nk8Qzhaanq5Z7ukRRLS9z0H4qcd734HsBfJ6WyXuG"
     )
   )
+  import twitter4j.Status 
 
   lazy val demoUI = new TwitterDemoUI()
 
+  def getTags(status: Status) = status.getText.split(" ").filter(_.startsWith("#"))
+  
   def authorizations(num: Int): Seq[Authorization] = {
     assert(twitterOAuthDetails.length >= num)
     twitterOAuthDetails.map(oauth => {

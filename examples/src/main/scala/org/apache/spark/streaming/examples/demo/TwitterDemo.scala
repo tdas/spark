@@ -27,14 +27,12 @@ object TwitterDemo {
     )
 
     // Count the tags over a 1 minute window
-    val tagCounts = tweets.flatMap(status => status.getText.split(" ").filter(_.startsWith("#")))
+    val tagCounts = tweets.flatMap(status => getTags(status))
                           .countByValueAndWindow(Minutes(1), Seconds(1))
+    tagCounts.print()
 
     // Sort the tags by counts
-    val sortedTags = tagCounts.map { case (tag, count) => (count, tag) }
-                              .transform(_.sortByKey(false))
-
-    // Print top 10 tags
+    val sortedTags = tagCounts.map(_.swap).transform(_.sortByKey(false))
     sortedTags.foreach(showTopTags(20) _)
 
     ssc.start()
