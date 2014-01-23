@@ -1,10 +1,12 @@
 package org.apache.spark.streaming.examples.demo
 
 import org.apache.spark.streaming.{Minutes, Seconds, StreamingContext}
+import org.apache.spark.streaming.twitter._
 import org.apache.spark.SparkContext._
 import org.apache.spark.util.IntParam
 import StreamingContext._
 import TwitterDemoHelper._
+
 
 object TwitterDemo {
 
@@ -23,7 +25,7 @@ object TwitterDemo {
 
     // Create the streams of tweets
     val tweets = ssc.union(
-      authorizations(numStreams).map(oauth => ssc.twitterStream(Some(oauth)))
+      authorizations(numStreams).map(oauth => TwitterUtils.createStream(ssc, Some(oauth)))
     )
 
     // Count the tags over a 1 minute window
@@ -33,7 +35,7 @@ object TwitterDemo {
 
     // Sort the tags by counts
     val sortedTags = tagCounts.map(_.swap).transform(_.sortByKey(false))
-    sortedTags.foreach(showTopTags(20) _)
+    sortedTags.foreachRDD(showTopTags(20) _)
 
     ssc.start()
   }
