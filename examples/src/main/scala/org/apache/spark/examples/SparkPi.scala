@@ -29,7 +29,7 @@ object SparkPi {
       System.exit(1)
     }
     val spark = new SparkContext(args(0), "SparkPi",
-      System.getenv("SPARK_HOME"), Seq(System.getenv("SPARK_EXAMPLES_JAR")))
+      System.getenv("SPARK_HOME"), SparkContext.jarOfClass(this.getClass))
     val slices = if (args.length > 1) args(1).toInt else 2
     val n = 100000 * slices
     val count = spark.parallelize(1 to n, slices).map { i =>
@@ -38,6 +38,6 @@ object SparkPi {
       if (x*x + y*y < 1) 1 else 0
     }.reduce(_ + _)
     println("Pi is roughly " + 4.0 * count / n)
-    System.exit(0)
+    spark.stop()
   }
 }

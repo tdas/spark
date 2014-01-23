@@ -25,15 +25,19 @@ import com.esotericsoftware.kryo.{KryoException, Kryo}
 import com.esotericsoftware.kryo.io.{Input => KryoInput, Output => KryoOutput}
 import com.twitter.chill.{EmptyScalaKryoInstantiator, AllScalaRegistrar}
 
-import org.apache.spark.{SerializableWritable, Logging}
+import org.apache.spark._
 import org.apache.spark.broadcast.HttpBroadcast
-import org.apache.spark.storage.{GetBlock,GotBlock, PutBlock, StorageLevel, TestBlockId}
+import org.apache.spark.scheduler.MapStatus
+import org.apache.spark.storage._
+import org.apache.spark.storage.{GetBlock, GotBlock, PutBlock}
 
 /**
- * A Spark serializer that uses the [[http://code.google.com/p/kryo/wiki/V1Documentation Kryo 1.x library]].
+ * A Spark serializer that uses the [[https://code.google.com/p/kryo/ Kryo serialization library]].
  */
-class KryoSerializer extends org.apache.spark.serializer.Serializer with Logging {
-  private val bufferSize = System.getProperty("spark.kryoserializer.buffer.mb", "2").toInt * 1024 * 1024
+class KryoSerializer(conf: SparkConf) extends org.apache.spark.serializer.Serializer with Logging {
+  private val bufferSize = {
+    conf.getInt("spark.kryoserializer.buffer.mb", 2) * 1024 * 1024
+  }
 
   def newKryoOutput() = new KryoOutput(bufferSize)
 
@@ -42,21 +46,11 @@ class KryoSerializer extends org.apache.spark.serializer.Serializer with Logging
     val kryo = instantiator.newKryo()
     val classLoader = Thread.currentThread.getContextClassLoader
 
-    val blockId = TestBlockId("1")
-    // Register some commonly used classes
-    val toRegister: Seq[AnyRef] = Seq(
-      ByteBuffer.allocate(1),
-      StorageLevel.MEMORY_ONLY,
-      PutBlock(blockId, ByteBuffer.allocate(1), StorageLevel.MEMORY_ONLY),
-      GotBlock(blockId, ByteBuffer.allocate(1)),
-      GetBlock(blockId),
-      1 to 10,
-      1 until 10,
-      1L to 10L,
-      1L until 10L
-    )
+    // Allow disabling Kryo reference tracking if user knows their object graphs don't have loops.
+    // Do this before we invoke the user registrator so the user registrator can override this.
+    kryo.setReferences(conf.getBoolean("spark.kryo.referenceTracking", true))
 
-    for (obj <- toRegister) kryo.register(obj.getClass)
+    for (cls <- KryoSerializer.toRegister) kryo.register(cls)
 
     // Allow sending SerializableWritable
     kryo.register(classOf[SerializableWritable[_]], new KryoJavaSerializer())
@@ -64,13 +58,13 @@ class KryoSerializer extends org.apache.spark.serializer.Serializer with Logging
 
     // Allow the user to register their own classes by setting spark.kryo.registrator
     try {
-      Option(System.getProperty("spark.kryo.registrator")).foreach { regCls =>
+      for (regCls <- conf.getOption("spark.kryo.registrator")) {
         logDebug("Running user registrator: " + regCls)
         val reg = Class.forName(regCls, true, classLoader).newInstance().asInstanceOf[KryoRegistrator]
         reg.registerClasses(kryo)
       }
     } catch {
-      case _: Exception => println("Failed to register spark.kryo.registrator")
+      case e: Exception => logError("Failed to run spark.kryo.registrator", e)
     }
 
     // Register Chill's classes; we do this after our ranges and the user's own classes to let
@@ -78,10 +72,6 @@ class KryoSerializer extends org.apache.spark.serializer.Serializer with Logging
     new AllScalaRegistrar().apply(kryo)
 
     kryo.setClassLoader(classLoader)
-
-    // Allow disabling Kryo reference tracking if user knows their object graphs don't have loops
-    kryo.setReferences(System.getProperty("spark.kryo.referenceTracking", "true").toBoolean)
-
     kryo
   }
 
@@ -164,4 +154,22 @@ private[spark] class KryoSerializerInstance(ks: KryoSerializer) extends Serializ
  */
 trait KryoRegistrator {
   def registerClasses(kryo: Kryo)
+}
+
+private[serializer] object KryoSerializer {
+  // Commonly used classes.
+  private val toRegister: Seq[Class[_]] = Seq(
+    ByteBuffer.allocate(1).getClass,
+    classOf[StorageLevel],
+    classOf[PutBlock],
+    classOf[GotBlock],
+    classOf[GetBlock],
+    classOf[MapStatus],
+    classOf[BlockManagerId],
+    classOf[Array[Byte]],
+    (1 to 10).getClass,
+    (1 until 10).getClass,
+    (1L to 10L).getClass,
+    (1L until 10L).getClass
+  )
 }

@@ -32,21 +32,13 @@ import org.apache.spark.serializer.{SerializationStream, Serializer}
  *
  * This interface does not support concurrent writes.
  */
-abstract class BlockObjectWriter(val blockId: BlockId) {
-
-  var closeEventHandler: () => Unit = _
+private[spark] abstract class BlockObjectWriter(val blockId: BlockId) {
 
   def open(): BlockObjectWriter
 
-  def close() {
-    closeEventHandler()
-  }
+  def close()
 
   def isOpen: Boolean
-
-  def registerCloseEventHandler(handler: () => Unit) {
-    closeEventHandler = handler
-  }
 
   /**
    * Flush the partial writes and commit them as a single atomic block. Return the
@@ -77,12 +69,13 @@ abstract class BlockObjectWriter(val blockId: BlockId) {
 }
 
 /** BlockObjectWriter which writes directly to a file on disk. Appends to the given file. */
-class DiskBlockObjectWriter(
-                             blockId: BlockId,
-                             file: File,
-                             serializer: Serializer,
-                             bufferSize: Int,
-                             compressStream: OutputStream => OutputStream)
+private[spark] class DiskBlockObjectWriter(
+    blockId: BlockId,
+    file: File,
+    serializer: Serializer,
+    bufferSize: Int,
+    compressStream: OutputStream => OutputStream,
+    syncWrites: Boolean)
   extends BlockObjectWriter(blockId)
   with Logging
 {
@@ -101,9 +94,9 @@ class DiskBlockObjectWriter(
     def write(i: Int): Unit = callWithTiming(out.write(i))
     override def write(b: Array[Byte]) = callWithTiming(out.write(b))
     override def write(b: Array[Byte], off: Int, len: Int) = callWithTiming(out.write(b, off, len))
+    override def close() = out.close()
+    override def flush() = out.flush()
   }
-
-  private val syncWrites = System.getProperty("spark.shuffle.sync", "false").toBoolean
 
   /** The file channel, used for repositioning / truncating the file. */
   private var channel: FileChannel = null
@@ -111,8 +104,8 @@ class DiskBlockObjectWriter(
   private var fos: FileOutputStream = null
   private var ts: TimeTrackingOutputStream = null
   private var objOut: SerializationStream = null
-  private var initialPosition = 0L
-  private var lastValidPosition = 0L
+  private val initialPosition = file.length()
+  private var lastValidPosition = initialPosition
   private var initialized = false
   private var _timeWriting = 0L
 
@@ -120,7 +113,6 @@ class DiskBlockObjectWriter(
     fos = new FileOutputStream(file, true)
     ts = new TimeTrackingOutputStream(fos)
     channel = fos.getChannel()
-    initialPosition = channel.position
     lastValidPosition = initialPosition
     bs = compressStream(new FastBufferedOutputStream(ts, bufferSize))
     objOut = serializer.newInstance().serializeStream(bs)
@@ -147,8 +139,6 @@ class DiskBlockObjectWriter(
       ts = null
       objOut = null
     }
-    // Invoke the close callback handler.
-    super.close()
   }
 
   override def isOpen: Boolean = objOut != null
@@ -191,4 +181,8 @@ class DiskBlockObjectWriter(
 
   // Only valid if called after close()
   override def timeWriting() = _timeWriting
+
+  def bytesWritten: Long = {
+    lastValidPosition - initialPosition
+  }
 }
