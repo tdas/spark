@@ -285,7 +285,7 @@ class CleanerTester(
         assert(rddIds.forall(!sc.persistentRdds.contains(_)))
         assert(rddIds.forall(rddId => !blockManager.master.contains(rddBlockId(rddId))))
 
-        // Verify all shuffles have been deregistered and cleaned up
+        // Verify all shuffles have been de-registered and cleaned up
         assert(shuffleIds.forall(!mapOutputTrackerMaster.containsShuffle(_)))
         assert(shuffleIds.forall(sid => !diskBlockManager.containsBlock(shuffleBlockId(sid))))
 
