@@ -124,8 +124,8 @@ public final class JavaLogQuery {
 
     List<Tuple2<Tuple3<String, String, String>, Stats>> output = counts.collect();
     for (Tuple2<?,?> t : output) {
-      System.out.println(t._1 + "\t" + t._2);
+      System.out.println(t._1() + "\t" + t._2());
     }
-    System.exit(0);
+    jsc.stop();
   }
 }

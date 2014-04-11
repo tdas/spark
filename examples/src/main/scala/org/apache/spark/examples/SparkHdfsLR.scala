@@ -34,8 +34,6 @@ object SparkHdfsLR {
   case class DataPoint(x: Vector, y: Double)
 
   def parsePoint(line: String): DataPoint = {
-    //val nums = line.split(' ').map(_.toDouble)
-    //return DataPoint(new Vector(nums.slice(1, D+1)), nums(0))
     val tok = new java.util.StringTokenizer(line, " ")
     var y = tok.nextToken.toDouble
     var x = new Array[Double](D)
@@ -54,7 +52,7 @@ object SparkHdfsLR {
     val inputPath = args(1)
     val conf = SparkHadoopUtil.get.newConfiguration()
     val sc = new SparkContext(args(0), "SparkHdfsLR",
-      System.getenv("SPARK_HOME"), SparkContext.jarOfClass(this.getClass), Map(), 
+      System.getenv("SPARK_HOME"), SparkContext.jarOfClass(this.getClass), Map(),
       InputFormatInfo.computePreferredLocations(
         Seq(new InputFormatInfo(conf, classOf[org.apache.hadoop.mapred.TextInputFormat], inputPath))
       ))
@@ -75,6 +73,6 @@ object SparkHdfsLR {
     }
 
     println("Final w: " + w)
-    System.exit(0)
+    sc.stop()
   }
 }

@@ -89,7 +89,7 @@ class JavaSparkContext(val sc: SparkContext) extends JavaSparkContextVarargsWork
    */
   def this(master: String, appName: String, sparkHome: String, jars: Array[String],
       environment: JMap[String, String]) =
-    this(new SparkContext(master, appName, sparkHome, jars.toSeq, environment))
+    this(new SparkContext(master, appName, sparkHome, jars.toSeq, environment, Map()))
 
   private[spark] val env = sc.env
 
@@ -153,6 +153,34 @@ class JavaSparkContext(val sc: SparkContext) extends JavaSparkContextVarargsWork
    * Hadoop-supported file system URI, and return it as an RDD of Strings.
    */
   def textFile(path: String, minSplits: Int): JavaRDD[String] = sc.textFile(path, minSplits)
+
+  /**
+   * Read a directory of text files from HDFS, a local file system (available on all nodes), or any
+   * Hadoop-supported file system URI. Each file is read as a single record and returned in a
+   * key-value pair, where the key is the path of each file, the value is the content of each file.
+   *
+   * <p> For example, if you have the following files:
+   * {{{
+   *   hdfs://a-hdfs-path/part-00000
+   *   hdfs://a-hdfs-path/part-00001
+   *   ...
+   *   hdfs://a-hdfs-path/part-nnnnn
+   * }}}
+   *
+   * Do `JavaPairRDD<String, String> rdd = sparkContext.wholeTextFiles("hdfs://a-hdfs-path")`,
+   *
+   * <p> then `rdd` contains
+   * {{{
+   *   (a-hdfs-path/part-00000, its content)
+   *   (a-hdfs-path/part-00001, its content)
+   *   ...
+   *   (a-hdfs-path/part-nnnnn, its content)
+   * }}}
+   *
+   * @note Small files are preferred, as each file will be loaded fully in memory.
+   */
+  def wholeTextFiles(path: String): JavaPairRDD[String, String] =
+    new JavaPairRDD(sc.wholeTextFiles(path))
 
   /** Get an RDD for a Hadoop SequenceFile with given key and value types.
     *
@@ -434,6 +462,7 @@ class JavaSparkContext(val sc: SparkContext) extends JavaSparkContextVarargsWork
    * Clear the job's list of JARs added by `addJar` so that they do not get downloaded to
    * any new nodes.
    */
+  @deprecated("adding jars no longer creates local copies that need to be deleted", "1.0.0")
   def clearJars() {
     sc.clearJars()
   }
@@ -442,6 +471,7 @@ class JavaSparkContext(val sc: SparkContext) extends JavaSparkContextVarargsWork
    * Clear the job's list of files added by `addFile` so that they do not get downloaded to
    * any new nodes.
    */
+  @deprecated("adding files no longer creates local copies that need to be deleted", "1.0.0")
   def clearFiles() {
     sc.clearFiles()
   }
@@ -461,7 +491,7 @@ class JavaSparkContext(val sc: SparkContext) extends JavaSparkContextVarargsWork
     sc.setCheckpointDir(dir)
   }
 
-  def getCheckpointDir = JavaUtils.optionToOptional(sc.getCheckpointDir)
+  def getCheckpointDir: Optional[String] = JavaUtils.optionToOptional(sc.getCheckpointDir)
 
   protected def checkpointFile[T](path: String): JavaRDD[T] = {
     implicit val ctag: ClassTag[T] = fakeClassTag

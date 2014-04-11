@@ -19,8 +19,14 @@ package org.apache.spark
 
 import scala.collection.mutable.ArrayBuffer
 
+import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.executor.TaskMetrics
 
+/**
+ * :: DeveloperApi ::
+ * Contextual information about a task which can be read or mutated during execution.
+ */
+@DeveloperApi
 class TaskContext(
   val stageId: Int,
   val partitionId: Int,
@@ -46,6 +52,7 @@ class TaskContext(
   }
 
   def executeOnCompleteCallbacks() {
-    onCompleteCallbacks.foreach{_()}
+    // Process complete callbacks in the reverse order of registration
+    onCompleteCallbacks.reverse.foreach{_()}
   }
 }

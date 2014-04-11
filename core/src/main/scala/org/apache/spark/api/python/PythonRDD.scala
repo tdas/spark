@@ -19,6 +19,7 @@ package org.apache.spark.api.python
 
 import java.io._
 import java.net._
+import java.nio.charset.Charset
 import java.util.{List => JList, ArrayList => JArrayList, Map => JMap, Collections}
 
 import scala.collection.JavaConversions._
@@ -99,6 +100,14 @@ private[spark] class PythonRDD[T: ClassTag](
         }
       }
     }.start()
+
+    /*
+     * Partial fix for SPARK-1019: Attempts to stop reading the input stream since
+     * other completion callbacks might invalidate the input. Because interruption
+     * is not synchronous this still leaves a potential race where the interruption is
+     * processed only after the stream becomes invalid.
+     */
+    context.addOnCompleteCallback(() => context.interrupted = true)
 
     // Return an iterator that read lines from the process's stdout
     val stream = new DataInputStream(new BufferedInputStream(worker.getInputStream, bufferSize))
@@ -198,6 +207,7 @@ private object SpecialLengths {
 }
 
 private[spark] object PythonRDD {
+  val UTF8 = Charset.forName("UTF-8")
 
   def readRDDFromFile(sc: JavaSparkContext, filename: String, parallelism: Int):
   JavaRDD[Array[Byte]] = {
@@ -258,7 +268,7 @@ private[spark] object PythonRDD {
   }
 
   def writeUTF(str: String, dataOut: DataOutputStream) {
-    val bytes = str.getBytes("UTF-8")
+    val bytes = str.getBytes(UTF8)
     dataOut.writeInt(bytes.length)
     dataOut.write(bytes)
   }
@@ -278,7 +288,7 @@ private[spark] object PythonRDD {
 
 private
 class BytesToString extends org.apache.spark.api.java.function.Function[Array[Byte], String] {
-  override def call(arr: Array[Byte]) : String = new String(arr, "UTF-8")
+  override def call(arr: Array[Byte]) : String = new String(arr, PythonRDD.UTF8)
 }
 
 /**

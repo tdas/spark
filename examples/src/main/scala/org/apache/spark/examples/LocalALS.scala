@@ -53,7 +53,6 @@ object LocalALS {
     for (i <- 0 until M; j <- 0 until U) {
       r.set(i, j, blas.ddot(ms(i), us(j)))
     }
-    //println("R: " + r)
     blas.daxpy(-1, targetR, r)
     val sumSqs = r.aggregate(Functions.plus, Functions.square)
     sqrt(sumSqs / (M * U))
@@ -121,7 +120,7 @@ object LocalALS {
       }
     }
     printf("Running with M=%d, U=%d, F=%d, iters=%d\n", M, U, F, ITERATIONS)
-    
+
     val R = generateR()
 
     // Initialize m and u randomly

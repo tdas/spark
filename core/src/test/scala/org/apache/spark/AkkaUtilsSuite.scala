@@ -45,18 +45,18 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
 
     val masterTracker = new MapOutputTrackerMaster(conf)
     masterTracker.trackerActor = actorSystem.actorOf(
-        Props(new MapOutputTrackerMasterActor(masterTracker)), "MapOutputTracker")
+        Props(new MapOutputTrackerMasterActor(masterTracker, conf)), "MapOutputTracker")
 
     val badconf = new SparkConf
     badconf.set("spark.authenticate", "true")
     badconf.set("spark.authenticate.secret", "bad")
-    val securityManagerBad = new SecurityManager(badconf);
+    val securityManagerBad = new SecurityManager(badconf)
 
     assert(securityManagerBad.isAuthenticationEnabled() === true)
 
     val (slaveSystem, _) = AkkaUtils.createActorSystem("spark-slave", hostname, 0, 
       conf = conf, securityManager = securityManagerBad)
-    val slaveTracker = new MapOutputTracker(conf)
+    val slaveTracker = new MapOutputTrackerWorker(conf)
     val selection = slaveSystem.actorSelection(
       s"akka.tcp://spark@localhost:$boundPort/user/MapOutputTracker")
     val timeout = AkkaUtils.lookupTimeout(conf)
@@ -84,7 +84,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
 
     val masterTracker = new MapOutputTrackerMaster(conf)
     masterTracker.trackerActor = actorSystem.actorOf(
-        Props(new MapOutputTrackerMasterActor(masterTracker)), "MapOutputTracker")
+        Props(new MapOutputTrackerMasterActor(masterTracker, conf)), "MapOutputTracker")
 
     val badconf = new SparkConf
     badconf.set("spark.authenticate", "false")
@@ -93,7 +93,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
 
     val (slaveSystem, _) = AkkaUtils.createActorSystem("spark-slave", hostname, 0, 
       conf = badconf, securityManager = securityManagerBad)
-    val slaveTracker = new MapOutputTracker(conf)
+    val slaveTracker = new MapOutputTrackerWorker(conf)
     val selection = slaveSystem.actorSelection(
       s"akka.tcp://spark@localhost:$boundPort/user/MapOutputTracker")
     val timeout = AkkaUtils.lookupTimeout(conf)
@@ -136,7 +136,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
 
     val masterTracker = new MapOutputTrackerMaster(conf)
     masterTracker.trackerActor = actorSystem.actorOf(
-        Props(new MapOutputTrackerMasterActor(masterTracker)), "MapOutputTracker")
+        Props(new MapOutputTrackerMasterActor(masterTracker, conf)), "MapOutputTracker")
 
     val goodconf = new SparkConf
     goodconf.set("spark.authenticate", "true")
@@ -147,7 +147,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
 
     val (slaveSystem, _) = AkkaUtils.createActorSystem("spark-slave", hostname, 0,
       conf = goodconf, securityManager = securityManagerGood)
-    val slaveTracker = new MapOutputTracker(conf)
+    val slaveTracker = new MapOutputTrackerWorker(conf)
     val selection = slaveSystem.actorSelection(
       s"akka.tcp://spark@localhost:$boundPort/user/MapOutputTracker")
     val timeout = AkkaUtils.lookupTimeout(conf)
@@ -189,7 +189,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
 
     val masterTracker = new MapOutputTrackerMaster(conf)
     masterTracker.trackerActor = actorSystem.actorOf(
-        Props(new MapOutputTrackerMasterActor(masterTracker)), "MapOutputTracker")
+        Props(new MapOutputTrackerMasterActor(masterTracker, conf)), "MapOutputTracker")
 
     val badconf = new SparkConf
     badconf.set("spark.authenticate", "false")
@@ -200,7 +200,7 @@ class AkkaUtilsSuite extends FunSuite with LocalSparkContext {
 
     val (slaveSystem, _) = AkkaUtils.createActorSystem("spark-slave", hostname, 0,
       conf = badconf, securityManager = securityManagerBad)
-    val slaveTracker = new MapOutputTracker(conf)
+    val slaveTracker = new MapOutputTrackerWorker(conf)
     val selection = slaveSystem.actorSelection(
       s"akka.tcp://spark@localhost:$boundPort/user/MapOutputTracker")
     val timeout = AkkaUtils.lookupTimeout(conf)
