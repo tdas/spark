@@ -18,9 +18,9 @@
 
 package org.apache.spark.streaming.examples.demo
 
-import org.apache.spark.mllib.clustering.KMeans
 import org.apache.spark.SparkContext
-import org.apache.spark.SparkContext._
+import org.apache.spark.mllib.clustering.KMeans
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.util.IntParam
 
 object ClusteringDemoModel {
@@ -60,14 +60,14 @@ object ClusteringDemoModel {
    * getting excellent accuracy (otherwise every pair of Unicode characters would
    * potentially be a feature).
    */
-  def featurize(s: String): Array[Double] = {
+  def featurize(s: String): Vector = {
     val lower = s.toLowerCase.filter(c => c.isLetter || c.isSpaceChar)
     val result = new Array[Double](1000)
     val bigrams = lower.sliding(2).toArray
     for (h <- bigrams.map(_.hashCode % 1000)) {
       result(h) += 1.0 / bigrams.length
     }
-    result
+    Vectors.dense(result)
   }
 }
 

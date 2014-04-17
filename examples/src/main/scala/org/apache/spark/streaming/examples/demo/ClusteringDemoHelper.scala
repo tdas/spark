@@ -1,7 +1,7 @@
 package org.apache.spark.streaming.examples.demo
 
 import org.apache.spark.streaming._
-import org.apache.spark.Logging
+import org.apache.spark.{SparkConf, Logging}
 import org.apache.spark.ui.{UIUtils, JettyUtils}
 import org.apache.spark.ui.JettyUtils._
 import org.apache.spark.util.Utils
@@ -19,7 +19,7 @@ class ClusteringDemoUI() extends Logging {
   val handler = (request: HttpServletRequest) => this.render(request)
   val tagFreqData = ArrayBuffer[(String, Long)]()
   val tableHeaders = Seq("Tag", "Frequency")
-  JettyUtils.startJettyServer("0.0.0.0", port, Seq(("/", handler)))
+  JettyUtils.startJettyServer("0.0.0.0", port, Seq(("/", handler)), new SparkConf())
 
   def updateData(newData: Seq[(String, Long)]) {
     tagFreqData.clear()
@@ -27,7 +27,17 @@ class ClusteringDemoUI() extends Logging {
   }
 
   def render(request: HttpServletRequest): Seq[Node] = {
-    import UIUtils._
+    def makeRow(tagFreq: (String, Long)): Seq[Node] = {
+      <tr>
+        <td>
+          {tagFreq._1}
+        </td>
+        <td>
+          {tagFreq._2}
+        </td>
+      </tr>
+    }
+
     <html>
       <head>
         <meta http-equiv="refresh" content="1"/>
@@ -41,17 +51,6 @@ class ClusteringDemoUI() extends Logging {
         </table>
       </body>
     </html>
-  }
-
-  def makeRow(tagFreq: (String, Long)): Seq[Node] = {
-    <tr>
-      <td>
-        {tagFreq._1}
-      </td>
-      <td>
-        {tagFreq._2}
-      </td>
-    </tr>
   }
 }
 

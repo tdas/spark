@@ -17,13 +17,14 @@
 
 package org.apache.spark.streaming.examples.demo
 
-import org.apache.spark.streaming.{Seconds, StreamingContext}
-import org.apache.spark.mllib.clustering.{KMeans, KMeansModel}
-import org.apache.spark.streaming.twitter._
-import org.apache.spark.SparkContext
-import org.apache.spark.SparkConf
-import org.apache.spark.util.IntParam
 import TwitterHelper._
+
+import org.apache.spark.SparkConf
+import org.apache.spark.mllib.clustering.KMeansModel
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.streaming.{Seconds, StreamingContext}
+import org.apache.spark.streaming.twitter.TwitterUtils
+import org.apache.spark.util.IntParam
 
 object ClusteringDemo {
 
@@ -44,7 +45,9 @@ object ClusteringDemo {
 
     // Read the model from file
     println("Reading model")
-    val model = new KMeansModel(ssc.sparkContext.objectFile[Array[Double]](modelFile).collect())
+    val model = new KMeansModel(
+      ssc.sparkContext.objectFile[Array[Double]](modelFile).collect.map(Vectors.dense)
+    )
     println("Read model")
     // Apply model to filter tweets
     val tweets = TwitterUtils.createStream(ssc, Some(authorizations(0)))
@@ -64,13 +67,13 @@ object ClusteringDemo {
    * getting excellent accuracy (otherwise every pair of Unicode characters would
    * potentially be a feature).
    */
-  def featurize(s: String): Array[Double] = {
+  def featurize(s: String): Vector = {
     val lower = s.toLowerCase.filter(c => c.isLetter || c.isSpaceChar)
     val result = new Array[Double](1000)
     val bigrams = lower.sliding(2).toArray
     for (h <- bigrams.map(_.hashCode % 1000)) {
       result(h) += 1.0 / bigrams.length
     }
-    result
+    Vectors.dense(result)
   }
 }
