@@ -42,6 +42,8 @@ object ClusteringDemo {
     }
 
     val Array(master, modelFile, IntParam(clusterNumber)) = args
+    val ui = new ClusteringDemoUI()
+
 
     //Initialize SparkStreaming context
     val conf = new SparkConf().setMaster(master).setAppName(this.getClass.getSimpleName)
@@ -57,6 +59,7 @@ object ClusteringDemo {
     val statuses = tweets.map(_.getText)
     val filteredTweets = statuses.filter(t => model.predict(featurize(t)) == clusterNumber)
     filteredTweets.print()
+    filteredTweets.foreachRDD(tweetsRDD => ui.update(tweetsRDD.take(20)))
 
     // Start the streaming computation
     ssc.start()

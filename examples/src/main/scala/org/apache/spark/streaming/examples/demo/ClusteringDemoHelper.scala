@@ -16,29 +16,19 @@ class ClusteringDemoUI() extends Logging {
   val host = Option(System.getenv("SPARK_PUBLIC_DNS")).getOrElse(Utils.localHostName())
   val port = 6060
   val handler = (request: HttpServletRequest) => this.render(request)
-  val tagFreqData = ArrayBuffer[(String, Long)]()
+  val data = ArrayBuffer[String]()
   val tableHeaders = Seq("Tag", "Frequency")
   val conf = new SparkConf()
   val securityManager = new SecurityManager(conf)
   JettyUtils.startJettyServer(
     "0.0.0.0", port, Seq(JettyUtils.createServletHandler("/", handler, securityManager)), conf)
 
-  def updateData(newData: Seq[(String, Long)]) {
-    tagFreqData.clear()
-    tagFreqData ++= newData
+  def update(newData: Seq[String]) {
+    data.clear()
+    data ++= newData
   }
 
   def render(request: HttpServletRequest): Seq[Node] = {
-    def makeRow(tagFreq: (String, Long)): Seq[Node] = {
-      <tr>
-        <td>
-          {tagFreq._1}
-        </td>
-        <td>
-          {tagFreq._2}
-        </td>
-      </tr>
-    }
 
     <html>
       <head>
@@ -46,9 +36,9 @@ class ClusteringDemoUI() extends Logging {
       </head>
       <body>
         <table class="table table-bordered table-striped table-condensed sortable table-fixed">
-          <thead><th width="80%" align="left">Tag</th><th width="20%">Frequency</th></thead>
+          <thead><th align="left">Filtered Tweets</th></thead>
           <tbody>
-            {tagFreqData.map(r => makeRow(r))}
+            {data.map(r => <tr><td>{r}</td></tr>) } 
           </tbody>
         </table>
       </body>
