@@ -1,10 +1,9 @@
 package org.apache.spark.streaming.examples.demo
 
-import org.apache.spark.streaming._
 import org.apache.spark.{SparkConf, Logging}
-import org.apache.spark.ui.{UIUtils, JettyUtils}
-import org.apache.spark.ui.JettyUtils._
+import org.apache.spark.ui.JettyUtils
 import org.apache.spark.util.Utils
+import org.apache.spark.SecurityManager
 
 import org.eclipse.jetty.server.Handler
 
@@ -19,7 +18,10 @@ class ClusteringDemoUI() extends Logging {
   val handler = (request: HttpServletRequest) => this.render(request)
   val tagFreqData = ArrayBuffer[(String, Long)]()
   val tableHeaders = Seq("Tag", "Frequency")
-  JettyUtils.startJettyServer("0.0.0.0", port, Seq(("/", handler)), new SparkConf())
+  val conf = new SparkConf()
+  val securityManager = new SecurityManager(conf)
+  JettyUtils.startJettyServer(
+    "0.0.0.0", port, Seq(JettyUtils.createServletHandler("/", handler, securityManager)), conf)
 
   def updateData(newData: Seq[(String, Long)]) {
     tagFreqData.clear()

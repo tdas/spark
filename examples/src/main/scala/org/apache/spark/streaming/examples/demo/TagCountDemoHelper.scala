@@ -2,7 +2,7 @@ package org.apache.spark.streaming.examples.demo
 
 import org.apache.spark.streaming._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.Logging
+import org.apache.spark.{SecurityManager, SparkConf, Logging}
 import org.apache.spark.ui.{UIUtils, JettyUtils}
 import org.eclipse.jetty.server.Handler
 import org.apache.spark.ui.JettyUtils._
@@ -36,7 +36,10 @@ class TagCountDemoUI() extends Logging {
   val handler = (request: HttpServletRequest) => this.render(request)
   val tagFreqData = ArrayBuffer[(String, Long)]()
   val tableHeaders = Seq("Tag", "Frequency")
-  JettyUtils.startJettyServer("0.0.0.0", port, Seq(("/", handler)))
+  val conf = new SparkConf()
+  val securityManager = new SecurityManager(conf)
+  JettyUtils.startJettyServer(
+    "0.0.0.0", port, Seq(JettyUtils.createServletHandler("/", handler, securityManager)), conf)
 
   def updateData(newData: Seq[(String, Long)]) {
     tagFreqData.clear()
