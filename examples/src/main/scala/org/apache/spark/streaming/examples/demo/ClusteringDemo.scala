@@ -26,6 +26,11 @@ import org.apache.spark.streaming.{Seconds, StreamingContext}
 import org.apache.spark.streaming.twitter.TwitterUtils
 import org.apache.spark.util.IntParam
 
+/**
+ * Instructions
+ *
+ * $ bin/run-example org.apache.spark.streaming.examples.demo.ClusteringDemo `cat ~/spark-ec2/cluster-url ` model 1
+ */
 object ClusteringDemo {
 
   def main(args: Array[String]) {
@@ -45,9 +50,7 @@ object ClusteringDemo {
 
     // Read the model from file
     println("Reading model")
-    val model = new KMeansModel(
-      ssc.sparkContext.objectFile[Array[Double]](modelFile).collect.map(Vectors.dense)
-    )
+    val model = new KMeansModel(ssc.sparkContext.objectFile[Vector](modelFile).collect)
     println("Read model")
     // Apply model to filter tweets
     val tweets = TwitterUtils.createStream(ssc, Some(authorizations(0)))

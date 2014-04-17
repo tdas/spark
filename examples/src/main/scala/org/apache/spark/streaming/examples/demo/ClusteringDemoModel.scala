@@ -23,6 +23,25 @@ import org.apache.spark.mllib.clustering.KMeans
 import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.util.IntParam
 
+/**
+ * Instructions to run the demo
+ *
+ * First copy the tweets files from S3 bucket to local HDFS in a Spark cluster
+ *
+ * export AWS_ACCESS_KEY_ID=
+ * export AWS_SECRET_ACCESS_KEY=
+ *
+ * $ MASTER=`cat ~/spark-ec2/cluster-url` bin/spark-shell
+ * scala> val file = sc.textFile("s3n://databricks-demo-datasets/twitter/text")
+ * scala> file.saveAsTextFile("tweets")
+ *
+ * Then generate the model
+ * $ bin/run-example org.apache.spark.streaming.examples.demo.ClusteringDemoModel `cat ~/spark-ec2/cluster-url ` tweets  10  10  model
+ *
+ * See if the printed labels are good or not.
+ */
+
+
 object ClusteringDemoModel {
 
   def main(args: Array[String]) {
