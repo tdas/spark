@@ -49,8 +49,8 @@ import com.amazonaws.services.kinesis.clientlibrary.lib.worker.Worker
  * @param checkpointIntervalMillis for Kinesis checkpointing (not Spark checkpointing).
  *   See the Kinesis Spark Streaming documentation for more details on the different types 
  *     of checkpoints.
- * @param initialPositionInStream in the absence of Kinesis checkpoint info, this is the worker's initial 
- *   starting position in the stream.
+ * @param initialPositionInStream in the absence of Kinesis checkpoint info,
+ *   this is the worker's initial starting position in the stream.
  *   The values are either the beginning of the stream per Kinesis' limit of 24 hours 
  *   (InitialPositionInStream.TRIM_HORIZON) or the tip of the stream 
  *   (InitialPositionInStream.LATEST).
