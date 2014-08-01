@@ -65,8 +65,8 @@ object KinesisUtils extends Logging {
       checkpointIntervalMillis: Long,
       initialPositionInStream: InitialPositionInStream,
       storageLevel: StorageLevel): ReceiverInputDStream[Array[Byte]] = {
-    ssc.receiverStream(new KinesisReceiver(appName, streamName, endpointUrl, checkpointIntervalMillis,
-        initialPositionInStream, storageLevel))
+    ssc.receiverStream(new KinesisReceiver(appName, streamName, endpointUrl,
+      checkpointIntervalMillis, initialPositionInStream, storageLevel))
   }
 
   /**
@@ -100,7 +100,7 @@ object KinesisUtils extends Logging {
       checkpointIntervalMillis: Long, 
       initialPositionInStream: InitialPositionInStream, 
       storageLevel: StorageLevel): JavaReceiverInputDStream[Array[Byte]] = {
-    jssc.receiverStream(new KinesisReceiver(appName, stream, endpoint, checkpointIntervalMillis, 
-        initialPositionInStream, storageLevel))
+    createStream(jssc.ssc, appName, streamName, endpointUrl,
+      checkpointIntervalMillis, initialPositionInStream, storageLevel)
   }
 }
