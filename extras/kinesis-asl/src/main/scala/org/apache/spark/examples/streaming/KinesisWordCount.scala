@@ -21,7 +21,6 @@ import java.nio.ByteBuffer
 
 import scala.util.Random
 
-
 import org.apache.spark.SparkConf
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming._
