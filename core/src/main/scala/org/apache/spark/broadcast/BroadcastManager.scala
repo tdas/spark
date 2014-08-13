@@ -19,6 +19,7 @@ package org.apache.spark.broadcast
 
 import java.util.concurrent.atomic.AtomicLong
 
+import scala.concurrent.Future
 import scala.reflect.ClassTag
 
 import org.apache.spark._
@@ -62,7 +63,7 @@ private[spark] class BroadcastManager(
     broadcastFactory.newBroadcast[T](value_, isLocal, nextBroadcastId.getAndIncrement())
   }
 
-  def unbroadcast(id: Long, removeFromDriver: Boolean, blocking: Boolean) {
-    broadcastFactory.unbroadcast(id, removeFromDriver, blocking)
+  def unbroadcast(id: Long, removeFromDriver: Boolean): Future[Unit] = {
+    broadcastFactory.unbroadcast(id, removeFromDriver)
   }
 }

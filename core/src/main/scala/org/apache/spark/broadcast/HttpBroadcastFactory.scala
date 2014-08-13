@@ -17,6 +17,7 @@
 
 package org.apache.spark.broadcast
 
+import scala.concurrent.Future
 import scala.reflect.ClassTag
 
 import org.apache.spark.{SecurityManager, SparkConf}
@@ -26,6 +27,7 @@ import org.apache.spark.{SecurityManager, SparkConf}
  * HTTP server as the broadcast mechanism. Refer to
  * [[org.apache.spark.broadcast.HttpBroadcast]] for more details about this mechanism.
  */
+private[spark]
 class HttpBroadcastFactory extends BroadcastFactory {
   override def initialize(isDriver: Boolean, conf: SparkConf, securityMgr: SecurityManager) {
     HttpBroadcast.initialize(isDriver, conf, securityMgr)
@@ -41,7 +43,7 @@ class HttpBroadcastFactory extends BroadcastFactory {
    * @param removeFromDriver Whether to remove state from the driver
    * @param blocking Whether to block until unbroadcasted
    */
-  override def unbroadcast(id: Long, removeFromDriver: Boolean, blocking: Boolean) {
-    HttpBroadcast.unpersist(id, removeFromDriver, blocking)
+  override def unbroadcast(id: Long, removeFromDriver: Boolean): Future[Unit] = {
+    HttpBroadcast.unpersistAsync(id, removeFromDriver)
   }
 }

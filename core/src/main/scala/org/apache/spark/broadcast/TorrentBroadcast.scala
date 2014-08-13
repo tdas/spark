@@ -20,12 +20,14 @@ package org.apache.spark.broadcast
 import java.io.{ByteArrayOutputStream, ByteArrayInputStream, InputStream,
   ObjectInputStream, ObjectOutputStream, OutputStream}
 
+import scala.concurrent.{Future, Await}
 import scala.reflect.ClassTag
 import scala.util.Random
 
 import org.apache.spark.{Logging, SparkConf, SparkEnv, SparkException}
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.storage.{BroadcastBlockId, StorageLevel}
+import org.apache.spark.util.AkkaUtils
 
 /**
  *  A [[org.apache.spark.broadcast.Broadcast]] implementation that uses a BitTorrent-like
@@ -219,9 +221,10 @@ private[broadcast] object TorrentBroadcast extends Logging {
   private var compressionCodec: CompressionCodec = null
 
   def initialize(_isDriver: Boolean, conf: SparkConf) {
-    TorrentBroadcast.conf = conf // TODO: we might have to fix it in tests
+
     synchronized {
       if (!initialized) {
+        TorrentBroadcast.conf = conf
         compress = conf.getBoolean("spark.broadcast.compress", true)
         compressionCodec = CompressionCodec.createCodec(conf)
         initialized = true
@@ -290,9 +293,20 @@ private[broadcast] object TorrentBroadcast extends Logging {
    * Remove all persisted blocks associated with this torrent broadcast on the executors.
    * If removeFromDriver is true, also remove these persisted blocks on the driver.
    */
-  def unpersist(id: Long, removeFromDriver: Boolean, blocking: Boolean) = {
+  def unpersist(id: Long, removeFromDriver: Boolean, blocking: Boolean): Unit = {
+    val future = unpersistAsync(id, removeFromDriver)
+    if (blocking) {
+      Await.result(future, AkkaUtils.askTimeout(conf))
+    }
+  }
+
+  /**
+   * Remove all persisted blocks associated with this torrent broadcast on the executors.
+   * If removeFromDriver is true, also remove these persisted blocks on the driver.
+   */
+  def unpersistAsync(id: Long, removeFromDriver: Boolean): Future[Unit] = {
     synchronized {
-      SparkEnv.get.blockManager.master.removeBroadcast(id, removeFromDriver, blocking)
+      SparkEnv.get.blockManager.master.removeBroadcastAsync(id, removeFromDriver)
     }
   }
 }

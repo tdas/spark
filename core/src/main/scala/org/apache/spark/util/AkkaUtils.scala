@@ -164,8 +164,7 @@ private[spark] object AkkaUtils extends Logging {
       timeout: FiniteDuration): T = {
     // TODO: Consider removing multiple attempts
     if (actor == null) {
-      throw new SparkException("Error sending message as driverActor is null " +
-        "[message = " + message + "]")
+      throw new SparkException(s"Error sending message [$message] as actor is null")
     }
     var attempts = 0
     var lastException: Exception = null
@@ -182,13 +181,13 @@ private[spark] object AkkaUtils extends Logging {
         case ie: InterruptedException => throw ie
         case e: Exception =>
           lastException = e
-          logWarning("Error sending message in " + attempts + " attempts", e)
+          logWarning(s"Error sending message [$message] to [$actor] in $attempts attempts", e)
       }
       Thread.sleep(retryInterval)
     }
 
     throw new SparkException(
-      "Error sending message [message = " + message + "]", lastException)
+      s"Error sending message [$message] to [$actor]", lastException)
   }
 
   def makeDriverRef(name: String, conf: SparkConf, actorSystem: ActorSystem): ActorRef = {

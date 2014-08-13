@@ -47,7 +47,8 @@ import org.apache.spark.storage.ShuffleIndexBlockId
 abstract class ContextCleanerSuiteBase(val shuffleManager: Class[_] = classOf[HashShuffleManager])
   extends FunSuite with BeforeAndAfter with LocalSparkContext
 {
-  implicit val defaultTimeout = timeout(10000 millis)
+  val defaultTimeoutMillis = 10000
+  implicit val defaultTimeout = timeout(defaultTimeoutMillis millis)
   val conf = new SparkConf()
     .setMaster("local[2]")
     .setAppName("ContextCleanerSuite")
@@ -118,13 +119,14 @@ abstract class ContextCleanerSuiteBase(val shuffleManager: Class[_] = classOf[Ha
  * Basic ContextCleanerSuite, which uses sort-based shuffle
  */
 class ContextCleanerSuite extends ContextCleanerSuiteBase {
+
   test("cleanup RDD") {
     val rdd = newRDD().persist()
     val collected = rdd.collect().toList
     val tester = new CleanerTester(sc, rddIds = Seq(rdd.id))
 
     // Explicit cleanup
-    cleaner.doCleanupRDD(rdd.id, blocking = true)
+    cleaner.cleanupRDD(rdd.id, defaultTimeoutMillis)
     tester.assertCleanup()
 
     // Verify that RDDs can be re-executed after cleaning up
@@ -137,7 +139,7 @@ class ContextCleanerSuite extends ContextCleanerSuiteBase {
     val tester = new CleanerTester(sc, shuffleIds = shuffleDeps.map(_.shuffleId))
 
     // Explicit cleanup
-    shuffleDeps.foreach(s => cleaner.doCleanupShuffle(s.shuffleId, blocking = true))
+    shuffleDeps.foreach(s => cleaner.cleanupShuffle(s.shuffleId, defaultTimeoutMillis))
     tester.assertCleanup()
 
     // Verify that shuffles can be re-executed after cleaning up
@@ -149,7 +151,7 @@ class ContextCleanerSuite extends ContextCleanerSuiteBase {
     val tester = new CleanerTester(sc, broadcastIds = Seq(broadcast.id))
 
     // Explicit cleanup
-    cleaner.doCleanupBroadcast(broadcast.id, blocking = true)
+    cleaner.cleanupBroadcast(broadcast.id, defaultTimeoutMillis)
     tester.assertCleanup()
   }
 
@@ -161,7 +163,7 @@ class ContextCleanerSuite extends ContextCleanerSuiteBase {
     val preGCTester =  new CleanerTester(sc, rddIds = Seq(rdd.id))
     runGC()
     intercept[Exception] {
-      preGCTester.assertCleanup()(timeout(1000 millis))
+      preGCTester.assertCleanup()
     }
 
     // Test that GC causes RDD cleanup after dereferencing the RDD
@@ -179,7 +181,7 @@ class ContextCleanerSuite extends ContextCleanerSuiteBase {
     val preGCTester = new CleanerTester(sc, shuffleIds = Seq(0))
     runGC()
     intercept[Exception] {
-      preGCTester.assertCleanup()(timeout(1000 millis))
+      preGCTester.assertCleanup()
     }
 
     // Test that GC causes shuffle cleanup after dereferencing the RDD
@@ -196,7 +198,7 @@ class ContextCleanerSuite extends ContextCleanerSuiteBase {
     val preGCTester =  new CleanerTester(sc, broadcastIds = Seq(broadcast.id))
     runGC()
     intercept[Exception] {
-      preGCTester.assertCleanup()(timeout(1000 millis))
+      preGCTester.assertCleanup()
     }
 
     // Test that GC causes broadcast cleanup after dereferencing the broadcast variable
@@ -218,7 +220,7 @@ class ContextCleanerSuite extends ContextCleanerSuiteBase {
     val preGCTester =  new CleanerTester(sc, rddIds, shuffleIds, broadcastIds)
     runGC()
     intercept[Exception] {
-      preGCTester.assertCleanup()(timeout(1000 millis))
+      preGCTester.assertCleanup()
     }
 
     // Test that GC triggers the cleanup of all variables after the dereferencing them
@@ -257,7 +259,7 @@ class ContextCleanerSuite extends ContextCleanerSuiteBase {
     val preGCTester = new CleanerTester(sc, rddIds, shuffleIds, broadcastIds)
     runGC()
     intercept[Exception] {
-      preGCTester.assertCleanup()(timeout(1000 millis))
+      preGCTester.assertCleanup()
     }
 
     // Test that GC triggers the cleanup of all variables after the dereferencing them
@@ -287,7 +289,7 @@ class SortShuffleContextCleanerSuite extends ContextCleanerSuiteBase(classOf[Sor
     val tester = new CleanerTester(sc, shuffleIds = shuffleDeps.map(_.shuffleId))
 
     // Explicit cleanup
-    shuffleDeps.foreach(s => cleaner.doCleanupShuffle(s.shuffleId, blocking = true))
+    shuffleDeps.foreach(s => cleaner.cleanupShuffle(s.shuffleId, defaultTimeoutMillis))
     tester.assertCleanup()
 
     // Verify that shuffles can be re-executed after cleaning up
@@ -302,7 +304,7 @@ class SortShuffleContextCleanerSuite extends ContextCleanerSuiteBase(classOf[Sor
     val preGCTester = new CleanerTester(sc, shuffleIds = Seq(0))
     runGC()
     intercept[Exception] {
-      preGCTester.assertCleanup()(timeout(1000 millis))
+      preGCTester.assertCleanup()
     }
 
     // Test that GC causes shuffle cleanup after dereferencing the RDD
@@ -333,7 +335,7 @@ class SortShuffleContextCleanerSuite extends ContextCleanerSuiteBase(classOf[Sor
     val preGCTester = new CleanerTester(sc, rddIds, shuffleIds, broadcastIds)
     runGC()
     intercept[Exception] {
-      preGCTester.assertCleanup()(timeout(1000 millis))
+      preGCTester.assertCleanup()
     }
 
     // Test that GC triggers the cleanup of all variables after the dereferencing them

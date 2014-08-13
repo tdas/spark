@@ -22,12 +22,15 @@ import java.io.{BufferedInputStream, BufferedOutputStream}
 import java.net.{URL, URLConnection, URI}
 import java.util.concurrent.TimeUnit
 
+import scala.concurrent.{Await, Future}
 import scala.reflect.ClassTag
 
 import org.apache.spark.{HttpServer, Logging, SecurityManager, SparkConf, SparkEnv}
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.storage.{BroadcastBlockId, StorageLevel}
-import org.apache.spark.util.{MetadataCleaner, MetadataCleanerType, TimeStampedHashSet, Utils}
+import org.apache.spark.util._
+import scala.Some
+import org.apache.spark.storage.BroadcastBlockId
 
 /**
  * A [[org.apache.spark.broadcast.Broadcast]] implementation that uses HTTP server
@@ -104,6 +107,7 @@ private[spark] class HttpBroadcast[T: ClassTag](
 
 private[broadcast] object HttpBroadcast extends Logging {
   private var initialized = false
+  private var conf: SparkConf = null
   private var broadcastDir: File = null
   private var compress: Boolean = false
   private var bufferSize: Int = 65536
@@ -120,6 +124,7 @@ private[broadcast] object HttpBroadcast extends Logging {
   def initialize(isDriver: Boolean, conf: SparkConf, securityMgr: SecurityManager) {
     synchronized {
       if (!initialized) {
+        HttpBroadcast.conf = conf
         bufferSize = conf.getInt("spark.buffer.size", 65536)
         compress = conf.getBoolean("spark.broadcast.compress", true)
         securityManager = securityMgr
@@ -213,12 +218,25 @@ private[broadcast] object HttpBroadcast extends Logging {
    * If removeFromDriver is true, also remove these persisted blocks on the driver
    * and delete the associated broadcast file.
    */
-  def unpersist(id: Long, removeFromDriver: Boolean, blocking: Boolean) = synchronized {
-    SparkEnv.get.blockManager.master.removeBroadcast(id, removeFromDriver, blocking)
+  def unpersistAsync(id: Long, removeFromDriver: Boolean): Future[Unit] = synchronized {
+    val future = SparkEnv.get.blockManager.master.removeBroadcastAsync(id, removeFromDriver)
     if (removeFromDriver) {
       val file = getFile(id)
       files.remove(file)
       deleteBroadcastFile(file)
+    }
+    future
+  }
+
+  /**
+   * Remove all persisted blocks associated with this HTTP broadcast on the executors.
+   * If removeFromDriver is true, also remove these persisted blocks on the driver
+   * and delete the associated broadcast file.
+   */
+  def unpersist(id: Long, removeFromDriver: Boolean, blocking: Boolean) {
+    val future = unpersistAsync(id, removeFromDriver)
+    if (blocking) {
+      Await.result(future, AkkaUtils.askTimeout(conf))
     }
   }
 

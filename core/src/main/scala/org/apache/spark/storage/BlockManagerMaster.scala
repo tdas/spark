@@ -98,39 +98,60 @@ class BlockManagerMaster(var driverActor: ActorRef, conf: SparkConf) extends Log
   }
 
   /** Remove all blocks belonging to the given RDD. */
-  def removeRdd(rddId: Int, blocking: Boolean) {
-    val future = askDriverWithReply[Future[Seq[Int]]](RemoveRdd(rddId))
-    future.onFailure {
-      case e: Throwable => logError("Failed to remove RDD " + rddId, e)
-    }
+  def removeRdd(rddId: Int, blocking: Boolean): Unit = {
+    val future = removeRddAsync(rddId)
     if (blocking) {
       Await.result(future, timeout)
     }
+  }
+
+  /** Remove all blocks belonging to the given RDD asynchronously. */
+  def removeRddAsync(rddId: Int): Future[Unit] = {
+    val future = askDriverWithReply[Future[Unit]](RemoveRdd(rddId))
+    future.onFailure {
+      case e: Exception =>
+        logError("Failed to remove RDD " + rddId, e)
+    }
+    future
   }
 
   /** Remove all blocks belonging to the given shuffle. */
-  def removeShuffle(shuffleId: Int, blocking: Boolean) {
-    val future = askDriverWithReply[Future[Seq[Boolean]]](RemoveShuffle(shuffleId))
-    future.onFailure {
-      case e: Throwable => logError("Failed to remove shuffle " + shuffleId, e)
-    }
+  def removeShuffle(shuffleId: Int, blocking: Boolean): Unit = {
+    val future = removeShuffleAsync(shuffleId)
     if (blocking) {
       Await.result(future, timeout)
     }
   }
 
-  /** Remove all blocks belonging to the given broadcast. */
-  def removeBroadcast(broadcastId: Long, removeFromMaster: Boolean, blocking: Boolean) {
-    val future = askDriverWithReply[Future[Seq[Int]]](
-      RemoveBroadcast(broadcastId, removeFromMaster))
+  /** Remove all blocks belonging to the given shuffle asynchronous. */
+  def removeShuffleAsync(shuffleId: Int): Future[Unit] = {
+    val future = askDriverWithReply[Future[Unit]](RemoveShuffle(shuffleId))
     future.onFailure {
-      case e: Throwable =>
-        logError("Failed to remove broadcast " + broadcastId +
-          " with removeFromMaster = " + removeFromMaster, e)
+      case e: Exception =>
+        logError("Failed to remove shuffle " + shuffleId, e)
     }
+    future
+  }
+
+  /** Remove all blocks belonging to the given broadcast. */
+  def removeBroadcast(
+      broadcastId: Long, removeFromMaster: Boolean, blocking: Boolean): Unit = {
+    val future = removeBroadcastAsync(broadcastId, removeFromMaster)
     if (blocking) {
       Await.result(future, timeout)
     }
+  }
+
+  /** Remove all blocks belonging to the given broadcast asynchronously. */
+  def removeBroadcastAsync(broadcastId: Long, removeFromMaster: Boolean): Future[Unit] = {
+    val future = askDriverWithReply[Future[Unit]](
+      RemoveBroadcast(broadcastId, removeFromMaster))
+    future.onFailure {
+      case e: Exception =>
+        logError("Failed to remove broadcast " + broadcastId +
+          " with removeFromMaster = " + removeFromMaster, e)
+    }
+    future
   }
 
   /**

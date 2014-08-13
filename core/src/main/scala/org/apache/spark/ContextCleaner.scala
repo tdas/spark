@@ -18,8 +18,11 @@
 package org.apache.spark
 
 import java.lang.ref.{ReferenceQueue, WeakReference}
+import java.util.concurrent._
 
 import scala.collection.mutable.{ArrayBuffer, SynchronizedBuffer}
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration._
 
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
@@ -54,22 +57,32 @@ private class CleanupTaskWeakReference(
  */
 private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
 
+  /**
+   * A buffer to store references to the CleanTaskWeakReference objects so
+   * that they do not get GCed even before the actual to-be-cleaned-up objects
+   * get GCed. These buffer needs to be cleaned explicitly when the
+   * CleanTaskWeakReference objects are not needed any more.
+   */
   private val referenceBuffer = new ArrayBuffer[CleanupTaskWeakReference]
     with SynchronizedBuffer[CleanupTaskWeakReference]
 
   private val referenceQueue = new ReferenceQueue[AnyRef]
 
-  private val listeners = new ArrayBuffer[CleanerListener]
-    with SynchronizedBuffer[CleanerListener]
+  private val concurrency = sc.conf.getInt("spark.cleaner.referenceTracking.concurrency", 10)
+  private val concurrencySemaphore = new Semaphore(concurrency, true)
 
-  private val cleaningThread = new Thread() { override def run() { keepCleaning() }}
+  private val listeners = new ArrayBuffer[CleanerListener] with SynchronizedBuffer[CleanerListener]
 
-  /**
-   * Whether the cleaning thread will block on cleanup tasks.
-   * This is set to true only for tests.
-   */
-  private val blockOnCleanupTasks = sc.conf.getBoolean(
-    "spark.cleaner.referenceTracking.blocking", false)
+  private val executorService = Executors.newFixedThreadPool(2, new ThreadFactory {
+    def newThread(r: Runnable): Thread = {
+      val t = new Thread(r)
+      t.setDaemon(true)
+      t.setName("Spark ContextCleaner threadpool")
+      t
+    }
+  })
+
+  private implicit val executionContext = ExecutionContext.fromExecutorService(executorService)
 
   @volatile private var stopped = false
 
@@ -80,14 +93,17 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
 
   /** Start the cleaner. */
   def start() {
-    cleaningThread.setDaemon(true)
-    cleaningThread.setName("Spark Context Cleaner")
-    cleaningThread.start()
+    executorService.submit(new Runnable {
+      def run() {
+        keepCleaning()
+      }
+    })
   }
 
   /** Stop the cleaner. */
   def stop() {
     stopped = true
+    executorService.shutdownNow()
   }
 
   /** Register a RDD for cleanup when it is garbage collected. */
@@ -114,73 +130,100 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
   private def keepCleaning(): Unit = Utils.logUncaughtExceptions {
     while (!stopped) {
       try {
-        val reference = Option(referenceQueue.remove(ContextCleaner.REF_QUEUE_POLL_TIMEOUT))
-          .map(_.asInstanceOf[CleanupTaskWeakReference])
-        reference.map(_.task).foreach { task =>
-          logDebug("Got cleaning task " + task)
-          referenceBuffer -= reference.get
-          task match {
-            case CleanRDD(rddId) =>
-              doCleanupRDD(rddId, blocking = blockOnCleanupTasks)
-            case CleanShuffle(shuffleId) =>
-              doCleanupShuffle(shuffleId, blocking = blockOnCleanupTasks)
-            case CleanBroadcast(broadcastId) =>
-              doCleanupBroadcast(broadcastId, blocking = blockOnCleanupTasks)
-          }
+        val reference = referenceQueue.remove().asInstanceOf[CleanupTaskWeakReference]
+        val task = reference.task
+        logDebug("Got cleaning task " + task)
+        referenceBuffer -= reference
+        concurrencySemaphore.acquire()
+        val future = doCleanupTask(task)
+        logDebug("Submitted cleaning task " + task)
+        future.onComplete { case t =>
+          concurrencySemaphore.release()
+          logDebug("Completed cleaning task " + task)
         }
       } catch {
-        case e: Exception => logError("Error in cleaning thread", e)
+        case ie: InterruptedException =>
+          // Ignore interrupts, as while loop will ensure that cleaning keeps running
+        case e: Exception =>
+          logError("Error in cleaning thread", e)
       }
     }
   }
 
-  /** Perform RDD cleanup. */
-  def doCleanupRDD(rddId: Int, blocking: Boolean) {
-    try {
-      logDebug("Cleaning RDD " + rddId)
-      sc.unpersistRDD(rddId, blocking)
+  /** Perform the cleanup task asynchronously. */
+  private def doCleanupTask(cleanupTask: CleanupTask): Future[Unit] = {
+    cleanupTask match {
+      case CleanRDD(rddId) =>
+        cleanupRDD(rddId)
+      case CleanShuffle(shuffleId) =>
+        cleanupShuffle(shuffleId)
+      case CleanBroadcast(broadcastId) =>
+        cleanupBroadcast(broadcastId)
+    }
+  }
+
+  /** Perform RDD cleanup asynchronously. */
+  def cleanupRDD(rddId: Int): Future[Unit] = {
+    logDebug("Cleaning RDD " + rddId)
+    val future = sc.unpersistRDDAsync(rddId)
+    future.onSuccess { case _ =>
       listeners.foreach(_.rddCleaned(rddId))
       logInfo("Cleaned RDD " + rddId)
-    } catch {
-      case e: Exception => logError("Error cleaning RDD " + rddId, e)
     }
+    future.onFailure { case e =>
+      logError("Error cleaning RDD " + rddId, e)
+    }
+    future
   }
 
-  /** Perform shuffle cleanup, asynchronously. */
-  def doCleanupShuffle(shuffleId: Int, blocking: Boolean) {
-    try {
-      logDebug("Cleaning shuffle " + shuffleId)
+  /** Perform shuffle cleanup asynchronously. */
+  def cleanupShuffle(shuffleId: Int): Future[Unit] = {
+    logDebug("Cleaning shuffle " + shuffleId)
+    val future = blockManagerMaster.removeShuffleAsync(shuffleId).map { _ =>
       mapOutputTrackerMaster.unregisterShuffle(shuffleId)
-      blockManagerMaster.removeShuffle(shuffleId, blocking)
+    }
+    future.onSuccess { case _ =>
       listeners.foreach(_.shuffleCleaned(shuffleId))
       logInfo("Cleaned shuffle " + shuffleId)
-    } catch {
-      case e: Exception => logError("Error cleaning shuffle " + shuffleId, e)
     }
+    future.onFailure { case e =>
+      logError("Error cleaning shuffle " + shuffleId, e)
+    }
+    future
   }
 
-  /** Perform broadcast cleanup. */
-  def doCleanupBroadcast(broadcastId: Long, blocking: Boolean) {
-    try {
-      logDebug("Cleaning broadcast " + broadcastId)
-      broadcastManager.unbroadcast(broadcastId, true, blocking)
+  /** Perform broadcast cleanup asynchronously. */
+  def cleanupBroadcast(broadcastId: Long): Future[Unit] = {
+    logDebug("Cleaning broadcast " + broadcastId)
+    val future = broadcastManager.unbroadcast(broadcastId, true)
+    future.onSuccess { case _ =>
       listeners.foreach(_.broadcastCleaned(broadcastId))
       logInfo("Cleaned broadcast " + broadcastId)
-    } catch {
+    }
+    future.onFailure { case e =>
       case e: Exception => logError("Error cleaning broadcast " + broadcastId, e)
     }
+    future
+  }
+
+  /** Perform RDD cleanup synchronously, used for testing. */
+  def cleanupRDD(rddId: Int, timeout: Int): Unit = {
+    Await.result(cleanupRDD(rddId), timeout millis)
+  }
+
+  /** Perform shuffle cleanup synchronously, used for testing. */
+  def cleanupShuffle(shuffleId: Int, timeout: Int): Unit = {
+    Await.result(cleanupShuffle(shuffleId), timeout millis)
+  }
+
+  /** Perform broadcast cleanup synchronously, used for testing. */
+  def cleanupBroadcast(broadcastId: Long, timeout: Int): Unit = {
+    Await.result(cleanupBroadcast(broadcastId), timeout millis)
   }
 
   private def blockManagerMaster = sc.env.blockManager.master
   private def broadcastManager = sc.env.broadcastManager
   private def mapOutputTrackerMaster = sc.env.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
-
-  // Used for testing. These methods explicitly blocks until cleanup is completed
-  // to ensure that more reliable testing.
-}
-
-private object ContextCleaner {
-  private val REF_QUEUE_POLL_TIMEOUT = 100
 }
 
 /**

@@ -24,11 +24,14 @@ import java.net.URI
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.{Properties, UUID}
 import java.util.UUID.randomUUID
+
 import scala.collection.{Map, Set}
 import scala.collection.JavaConversions._
 import scala.collection.generic.Growable
 import scala.collection.mutable.HashMap
+import scala.concurrent.{Await, Future}
 import scala.reflect.{ClassTag, classTag}
+
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.hadoop.io.{ArrayWritable, BooleanWritable, BytesWritable, DoubleWritable, FloatWritable, IntWritable, LongWritable, NullWritable, Text, Writable}
@@ -36,6 +39,7 @@ import org.apache.hadoop.mapred.{FileInputFormat, InputFormat, JobConf, Sequence
 import org.apache.hadoop.mapreduce.{InputFormat => NewInputFormat, Job => NewHadoopJob}
 import org.apache.hadoop.mapreduce.lib.input.{FileInputFormat => NewFileInputFormat}
 import org.apache.mesos.MesosNativeLibrary
+
 import akka.actor.Props
 
 import org.apache.spark.annotation.{DeveloperApi, Experimental}
@@ -50,7 +54,13 @@ import org.apache.spark.scheduler.cluster.mesos.{CoarseMesosSchedulerBackend, Me
 import org.apache.spark.scheduler.local.LocalBackend
 import org.apache.spark.storage._
 import org.apache.spark.ui.SparkUI
-import org.apache.spark.util.{CallSite, ClosureCleaner, MetadataCleaner, MetadataCleanerType, TimeStampedWeakValueHashMap, Utils}
+import org.apache.spark.util._
+import scala.Some
+import org.apache.spark.scheduler.SparkListenerApplicationStart
+import org.apache.spark.scheduler.SparkListenerApplicationEnd
+import org.apache.spark.util.CallSite
+import org.apache.spark.scheduler.SparkListenerEnvironmentUpdate
+import org.apache.spark.scheduler.SparkListenerUnpersistRDD
 
 /**
  * Main entry point for Spark functionality. A SparkContext represents the connection to a Spark
@@ -937,10 +947,21 @@ class SparkContext(config: SparkConf) extends Logging {
   /**
    * Unpersist an RDD from memory and/or disk storage
    */
-  private[spark] def unpersistRDD(rddId: Int, blocking: Boolean = true) {
-    env.blockManager.master.removeRdd(rddId, blocking)
+  private[spark] def unpersistRDD(rddId: Int, blocking: Boolean) {
+    val future = unpersistRDDAsync(rddId)
+    if (blocking) {
+      Await.result(future, AkkaUtils.askTimeout(conf))
+    }
+  }
+
+  /**
+   * Unpersist an RDD from memory and/or disk storage
+   */
+  private[spark] def unpersistRDDAsync(rddId: Int): Future[Unit] = {
+    val future = env.blockManager.master.removeRddAsync(rddId)
     persistentRdds.remove(rddId)
     listenerBus.post(SparkListenerUnpersistRDD(rddId))
+    future
   }
 
   /**

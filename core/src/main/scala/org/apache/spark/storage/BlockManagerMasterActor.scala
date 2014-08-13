@@ -132,7 +132,7 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
       logWarning("Got unknown message: " + other)
   }
 
-  private def removeRdd(rddId: Int): Future[Seq[Int]] = {
+  private def removeRdd(rddId: Int): Future[Unit] = {
     // First remove the metadata for the given RDD, and then asynchronously remove the blocks
     // from the slaves.
 
@@ -153,10 +153,10 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
       blockManagerInfo.values.map { bm =>
         bm.slaveActor.ask(removeMsg)(akkaTimeout).mapTo[Int]
       }.toSeq
-    )
+    ).map { case _ => }
   }
 
-  private def removeShuffle(shuffleId: Int): Future[Seq[Boolean]] = {
+  private def removeShuffle(shuffleId: Int): Future[Unit] = {
     // Nothing to do in the BlockManagerMasterActor data structures
     import context.dispatcher
     val removeMsg = RemoveShuffle(shuffleId)
@@ -164,7 +164,7 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
       blockManagerInfo.values.map { bm =>
         bm.slaveActor.ask(removeMsg)(akkaTimeout).mapTo[Boolean]
       }.toSeq
-    )
+    ).map { case _ => }
   }
 
   /**
@@ -172,7 +172,7 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
    * of all broadcast blocks. If removeFromDriver is false, broadcast blocks are only removed
    * from the executors, but not from the driver.
    */
-  private def removeBroadcast(broadcastId: Long, removeFromDriver: Boolean): Future[Seq[Int]] = {
+  private def removeBroadcast(broadcastId: Long, removeFromDriver: Boolean): Future[Unit] = {
     // TODO: Consolidate usages of <driver>
     import context.dispatcher
     val removeMsg = RemoveBroadcast(broadcastId, removeFromDriver)
@@ -183,7 +183,7 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
       requiredBlockManagers.map { bm =>
         bm.slaveActor.ask(removeMsg)(akkaTimeout).mapTo[Int]
       }.toSeq
-    )
+    ).map { case _ => }
   }
 
   private def removeBlockManager(blockManagerId: BlockManagerId) {
