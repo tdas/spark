@@ -20,7 +20,7 @@ package org.apache.spark.storage
 import java.io.{File, InputStream, OutputStream, BufferedOutputStream, ByteArrayOutputStream}
 import java.nio.{ByteBuffer, MappedByteBuffer}
 
-import scala.collection.mutable.{ArrayBuffer, HashMap}
+import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Random
@@ -37,7 +37,6 @@ import org.apache.spark.network.netty.server.BlockServer
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.ShuffleManager
 import org.apache.spark.util._
-import scala.collection.mutable
 
 
 private[spark] sealed trait BlockValues
@@ -139,7 +138,7 @@ private[spark] class BlockManager(
     MetadataCleanerType.BLOCK_MANAGER, this.dropOldNonBroadcastBlocks, conf)
   private val broadcastCleaner = new MetadataCleaner(
     MetadataCleanerType.BROADCAST_VARS, this.dropOldBroadcastBlocks, conf)
-  private val cachedPeers = new mutable.HashSet[BlockManagerId]
+  private val cachedPeers = new HashSet[BlockManagerId]
   private var lastPeerFetchTime = 0L
 
   initialize()
@@ -827,7 +826,7 @@ private[spark] class BlockManager(
   /**
    * Get peer block managers in the system.
    */
-  private def getPeers(forceFetch: Boolean): mutable.Set[BlockManagerId] = {
+  private def getPeers(forceFetch: Boolean): HashSet[BlockManagerId] = {
     val cachedPeersTtl = conf.getInt("spark.storage.cachedPeersTtl", 1000) // milliseconds
     def timeout = System.currentTimeMillis - lastPeerFetchTime > cachedPeersTtl
 
@@ -848,8 +847,8 @@ private[spark] class BlockManager(
   private def replicate(blockId: BlockId, data: ByteBuffer, level: StorageLevel): Unit = {
     val maxReplicationFailures = conf.getInt("spark.storage.maxReplicationFailures", 1)
     val numPeersToReplicateTo = level.replication - 1
-    val peersReplicatedTo = new mutable.HashSet[BlockManagerId]
-    val peersFailedToReplicateTo = new mutable.HashSet[BlockManagerId]
+    val peersReplicatedTo = new HashSet[BlockManagerId]
+    val peersFailedToReplicateTo = new HashSet[BlockManagerId]
     val tLevel = StorageLevel(
       level.useDisk, level.useMemory, level.useOffHeap, level.deserialized, 1)
     val startTime = System.nanoTime
