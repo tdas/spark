@@ -62,6 +62,8 @@ class BlockManagerId private (
 
   def nettyPort: Int = nettyPort_
 
+  def isDriver = (executorId == "<driver>")
+
   override def writeExternal(out: ObjectOutput) {
     out.writeUTF(executorId_)
     out.writeUTF(host_)
