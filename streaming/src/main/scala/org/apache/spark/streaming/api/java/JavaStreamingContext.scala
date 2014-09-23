@@ -21,7 +21,7 @@ package org.apache.spark.streaming.api.java
 import scala.collection.JavaConversions._
 import scala.reflect.ClassTag
 
-import java.io.InputStream
+import java.io.{Closeable, InputStream}
 import java.util.{List => JList, Map => JMap}
 
 import akka.actor.{Props, SupervisorStrategy}
@@ -49,7 +49,7 @@ import org.apache.spark.streaming.receiver.Receiver
  * respectively. `context.awaitTransformation()` allows the current thread to wait for the
  * termination of a context by `stop()` or by an exception.
  */
-class JavaStreamingContext(val ssc: StreamingContext) {
+class JavaStreamingContext(val ssc: StreamingContext) extends Closeable {
 
   /**
    * Create a StreamingContext.
@@ -540,12 +540,19 @@ class JavaStreamingContext(val ssc: StreamingContext) {
   def stop(stopSparkContext: Boolean, stopGracefully: Boolean) = {
     ssc.stop(stopSparkContext, stopGracefully)
   }
+
+  override def close(): Unit = stop()
+
 }
 
 /**
  * JavaStreamingContext object contains a number of utility functions.
  */
 object JavaStreamingContext {
+  implicit def fromStreamingContext(ssc: StreamingContext):
+    JavaStreamingContext = new JavaStreamingContext(ssc)
+
+  implicit def toStreamingContext(jssc: JavaStreamingContext): StreamingContext = jssc.ssc
 
   /**
    * Either recreate a StreamingContext from checkpoint data or create a new StreamingContext.
