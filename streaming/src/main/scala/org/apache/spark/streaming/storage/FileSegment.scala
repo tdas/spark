@@ -16,4 +16,4 @@
  */
 package org.apache.spark.streaming.storage
 
-class FileSegment (val path: String, val offset: Long, val length: Int)
+case class FileSegment (path: String, offset: Long, length: Int)
