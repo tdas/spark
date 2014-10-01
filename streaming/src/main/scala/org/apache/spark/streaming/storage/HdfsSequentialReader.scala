@@ -21,27 +21,23 @@ private[streaming] class HdfsSequentialReader(val path: String) {
   val instream = HdfsUtils.getInputStream(path)
   var closed = false
 
-  def hasNext: Boolean = {
+  def hasNext: Boolean = synchronized {
     assertOpen()
-    synchronized {
-      instream.available() != 0
-    }
+    instream.available() != 0
   }
 
-  def readNext(): Array[Byte] = {
-    assertOpen()
+  def readNext(): Array[Byte] = synchronized {
     // TODO: Possible error case where there are not enough bytes in the stream
     // TODO: How to handle that?
-    synchronized {
-      val length = instream.readInt()
-      HdfsUtils.checkState(length <= instream.available(), "Not enough data found in file!")
-      val buffer = new Array[Byte](length)
-      instream.readFully(buffer)
-      buffer
-    }
+    assertOpen()
+    val length = instream.readInt()
+    HdfsUtils.checkState(length <= instream.available(), "Not enough data found in file!")
+    val buffer = new Array[Byte](length)
+    instream.readFully(buffer)
+    buffer
   }
 
-  def close() {
+  def close() = synchronized {
     closed = true
     instream.close()
   }

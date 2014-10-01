@@ -17,7 +17,7 @@
 package org.apache.spark.streaming.storage
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.{FileStatus, FSDataInputStream, FSDataOutputStream, Path}
+import org.apache.hadoop.fs.{FSDataInputStream, FSDataOutputStream, Path}
 
 private[streaming] object HdfsUtils {
 
@@ -28,12 +28,16 @@ private[streaming] object HdfsUtils {
     val conf = new Configuration()
     val dfs =
       this.synchronized {
-        dfsPath.getFileSystem(new Configuration())
+        dfsPath.getFileSystem(conf)
       }
     // If the file exists and we have append support, append instead of creating a new file
     val stream: FSDataOutputStream = {
-      if (conf.getBoolean("hdfs.append.support", false) && dfs.isFile(dfsPath)) {
-        dfs.append(dfsPath)
+      if (dfs.isFile(dfsPath)) {
+        if (conf.getBoolean("hdfs.append.support", false)) {
+          dfs.append(dfsPath)
+        } else {
+          throw new IllegalStateException("File exists and there is no append support!")
+        }
       } else {
         dfs.create(dfsPath)
       }
@@ -43,7 +47,6 @@ private[streaming] object HdfsUtils {
 
   def getInputStream(path: String): FSDataInputStream = {
     val dfsPath = new Path(path)
-    val conf = new Configuration()
     val dfs = this.synchronized {
       dfsPath.getFileSystem(new Configuration())
     }

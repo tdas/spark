@@ -21,20 +21,18 @@ private[streaming] class HdfsWalRandomReader(val path: String) {
   val instream = HdfsUtils.getInputStream(path)
   var closed = false
 
-  def read(segment: FileSegment): Array[Byte] = {
+  def read(segment: FileSegment): Array[Byte] = synchronized {
     assertOpen()
-    synchronized {
-      instream.seek(segment.offset)
-      val nextLength = instream.readInt()
-      HdfsUtils.checkState(nextLength == segment.length,
-        "Expected message length to be " + segment.length + ", " + "but was " + nextLength)
-      val buffer = new Array[Byte](nextLength)
-      instream.readFully(buffer)
-      buffer
-    }
+    instream.seek(segment.offset)
+    val nextLength = instream.readInt()
+    HdfsUtils.checkState(nextLength == segment.length,
+      "Expected message length to be " + segment.length + ", " + "but was " + nextLength)
+    val buffer = new Array[Byte](nextLength)
+    instream.readFully(buffer)
+    buffer
   }
 
-  def close() {
+  def close() = synchronized {
     closed = true
     instream.close()
   }

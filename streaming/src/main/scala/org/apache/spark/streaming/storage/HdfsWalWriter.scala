@@ -24,19 +24,17 @@ private[streaming] class HdfsWalWriter(val path: String) {
   // Data is always written as:
   // - Length - Long
   // - Data - of length = Length
-  def write(data: Array[Byte]): FileSegment = {
+  def write(data: Array[Byte]): FileSegment = synchronized {
     assertOpen()
-    synchronized {
-      val segment = new FileSegment(path, nextOffset, data.length)
-      stream.writeInt(data.length)
-      stream.write(data)
-      stream.hflush()
-      nextOffset = stream.getPos
-      segment
-    }
+    val segment = new FileSegment(path, nextOffset, data.length)
+    stream.writeInt(data.length)
+    stream.write(data)
+    stream.hflush()
+    nextOffset = stream.getPos
+    segment
   }
 
-  def close(): Unit = {
+  def close(): Unit = synchronized {
     closed = true
     stream.close()
   }
