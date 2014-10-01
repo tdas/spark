@@ -34,4 +34,8 @@ class HdfsSequentialReader(val path: String) {
       buffer
     }
   }
+
+  def close() {
+    instream.close()
+  }
 }

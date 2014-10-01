@@ -32,5 +32,9 @@ class HdfsWalRandomReader(val path: String) {
       buffer
     }
   }
+
+  def close() {
+    instream.close()
+  }
 }
 

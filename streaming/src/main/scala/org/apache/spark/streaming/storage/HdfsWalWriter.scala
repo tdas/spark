@@ -33,4 +33,8 @@ class HdfsWalWriter(val path: String) {
       segment
     }
   }
+
+  def close(): Unit = {
+    stream.close()
+  }
 }
