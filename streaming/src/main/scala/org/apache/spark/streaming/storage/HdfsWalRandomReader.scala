@@ -21,13 +21,16 @@ class HdfsWalRandomReader(val path: String) {
   val instream = HdfsUtils.getInputStream(path)
 
   def read(segment: FileSegment): Array[Byte] = {
-    instream.seek(segment.offset)
-    val nextLength = instream.readInt()
-    assert(nextLength == segment.length, "Expected message length to be " + segment.length + ", " +
-      "but was " + nextLength)
-    val buffer = new Array[Byte](nextLength)
-    instream.readFully(buffer)
-    buffer
+    synchronized {
+      instream.seek(segment.offset)
+      val nextLength = instream.readInt()
+      assert(nextLength == segment.length,
+        "Expected message length to be " + segment.length + ", " +
+          "but was " + nextLength)
+      val buffer = new Array[Byte](nextLength)
+      instream.readFully(buffer)
+      buffer
+    }
   }
 }
 

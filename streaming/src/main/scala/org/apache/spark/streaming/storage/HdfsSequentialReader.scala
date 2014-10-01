@@ -21,13 +21,17 @@ class HdfsSequentialReader(val path: String) {
   val instream = HdfsUtils.getInputStream(path)
 
   def hasNext: Boolean = {
-    instream.available() != 0
+    synchronized {
+      instream.available() != 0
+    }
   }
 
   def readNext(): Array[Byte] = {
-    val length = instream.readInt()
-    val buffer = new Array[Byte](length)
-    instream.readFully(buffer)
-    buffer
+    synchronized {
+      val length = instream.readInt()
+      val buffer = new Array[Byte](length)
+      instream.readFully(buffer)
+      buffer
+    }
   }
 }

@@ -24,11 +24,13 @@ class HdfsWalWriter(val path: String) {
   // - Length - Long
   // - Data - of length = Length
   def write(data: Array[Byte]): FileSegment = {
-    val segment = new FileSegment(path, nextOffset, data.length)
-    stream.writeInt(data.length)
-    stream.write(data)
-    stream.hflush()
-    nextOffset = stream.getPos
-    segment
+    synchronized {
+      val segment = new FileSegment(path, nextOffset, data.length)
+      stream.writeInt(data.length)
+      stream.write(data)
+      stream.hflush()
+      nextOffset = stream.getPos
+      segment
+    }
   }
 }
