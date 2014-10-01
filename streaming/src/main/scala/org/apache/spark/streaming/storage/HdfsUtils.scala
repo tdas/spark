@@ -51,4 +51,10 @@ object HdfsUtils {
     instream
   }
 
+  def checkState(state: Boolean, errorMsg: => String) {
+    if(!state) {
+      throw new IllegalStateException(errorMsg)
+    }
+  }
+
 }

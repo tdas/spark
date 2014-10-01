@@ -19,14 +19,15 @@ package org.apache.spark.streaming.storage
 class HdfsWalRandomReader(val path: String) {
 
   val instream = HdfsUtils.getInputStream(path)
+  var closed = false
 
   def read(segment: FileSegment): Array[Byte] = {
+    assertOpen()
     synchronized {
       instream.seek(segment.offset)
       val nextLength = instream.readInt()
-      assert(nextLength == segment.length,
-        "Expected message length to be " + segment.length + ", " +
-          "but was " + nextLength)
+      HdfsUtils.checkState(nextLength == segment.length,
+        "Expected message length to be " + segment.length + ", " + "but was " + nextLength)
       val buffer = new Array[Byte](nextLength)
       instream.readFully(buffer)
       buffer
@@ -34,7 +35,12 @@ class HdfsWalRandomReader(val path: String) {
   }
 
   def close() {
+    closed = true
     instream.close()
+  }
+
+  def assertOpen() {
+    HdfsUtils.checkState(!closed, "Stream is closed. Create a new Reader to read from the file.")
   }
 }
 

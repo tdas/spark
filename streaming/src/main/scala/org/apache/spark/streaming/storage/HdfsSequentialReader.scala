@@ -19,16 +19,22 @@ package org.apache.spark.streaming.storage
 class HdfsSequentialReader(val path: String) {
 
   val instream = HdfsUtils.getInputStream(path)
+  var closed = false
 
   def hasNext: Boolean = {
+    assertOpen()
     synchronized {
       instream.available() != 0
     }
   }
 
   def readNext(): Array[Byte] = {
+    assertOpen()
+    // TODO: Possible error case where there are not enough bytes in the stream
+    // TODO: How to handle that?
     synchronized {
       val length = instream.readInt()
+      HdfsUtils.checkState(length <= instream.available(), "Not enough data found in file!")
       val buffer = new Array[Byte](length)
       instream.readFully(buffer)
       buffer
@@ -36,6 +42,12 @@ class HdfsSequentialReader(val path: String) {
   }
 
   def close() {
+    closed = true
     instream.close()
+  }
+
+  def assertOpen() {
+    HdfsUtils.checkState(!closed, "Stream is closed. Create a new Reader to read from the " +
+      "file.")
   }
 }

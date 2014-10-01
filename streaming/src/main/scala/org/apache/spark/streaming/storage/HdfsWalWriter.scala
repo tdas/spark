@@ -19,11 +19,13 @@ package org.apache.spark.streaming.storage
 class HdfsWalWriter(val path: String) {
   val stream = HdfsUtils.getOutputStream(path)
   var nextOffset = stream.getPos
+  var closed = false
 
   // Data is always written as:
   // - Length - Long
   // - Data - of length = Length
   def write(data: Array[Byte]): FileSegment = {
+    assertOpen()
     synchronized {
       val segment = new FileSegment(path, nextOffset, data.length)
       stream.writeInt(data.length)
@@ -35,6 +37,11 @@ class HdfsWalWriter(val path: String) {
   }
 
   def close(): Unit = {
+    closed = true
     stream.close()
+  }
+
+  def assertOpen() {
+    HdfsUtils.checkState(!closed, "Stream is closed. Create a new Writer to write to file.")
   }
 }
