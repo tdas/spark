@@ -16,7 +16,9 @@
  */
 package org.apache.spark.streaming.storage
 
-private[streaming] class HdfsWalRandomReader(val path: String) {
+import java.io.Closeable
+
+private[streaming] class WriteAheadLogRandomReader(val path: String) extends Closeable {
 
   val instream = HdfsUtils.getInputStream(path)
   var closed = false
@@ -32,12 +34,12 @@ private[streaming] class HdfsWalRandomReader(val path: String) {
     buffer
   }
 
-  def close() = synchronized {
+  override def close() = synchronized {
     closed = true
     instream.close()
   }
 
-  def assertOpen() {
+  private def assertOpen() {
     HdfsUtils.checkState(!closed, "Stream is closed. Create a new Reader to read from the file.")
   }
 }

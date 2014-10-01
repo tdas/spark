@@ -16,7 +16,9 @@
  */
 package org.apache.spark.streaming.storage
 
-private[streaming] class HdfsWalWriter(val path: String) {
+import java.io.Closeable
+
+private[streaming] class WriteAheadLogWriter(val path: String) extends Closeable {
   val stream = HdfsUtils.getOutputStream(path)
   var nextOffset = stream.getPos
   var closed = false
@@ -34,12 +36,12 @@ private[streaming] class HdfsWalWriter(val path: String) {
     segment
   }
 
-  def close(): Unit = synchronized {
+  override private[streaming] def close(): Unit = synchronized {
     closed = true
     stream.close()
   }
 
-  def assertOpen() {
+  private def assertOpen() {
     HdfsUtils.checkState(!closed, "Stream is closed. Create a new Writer to write to file.")
   }
 }

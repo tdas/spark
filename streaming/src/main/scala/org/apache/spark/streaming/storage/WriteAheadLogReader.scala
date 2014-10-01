@@ -16,34 +16,54 @@
  */
 package org.apache.spark.streaming.storage
 
-private[streaming] class HdfsSequentialReader(val path: String) {
+import java.io.Closeable
+
+private[streaming] class WriteAheadLogReader(val path: String)
+  extends Iterator[Array[Byte]] with Closeable {
 
   val instream = HdfsUtils.getInputStream(path)
   var closed = false
+  private var nextItem: Option[Array[Byte]] = None
 
-  def hasNext: Boolean = synchronized {
+  override def hasNext: Boolean = synchronized {
     assertOpen()
-    instream.available() != 0
+    if (nextItem.isDefined) { // handle the case where hasNext is called without calling next
+      true
+    } else {
+      val available = instream.available()
+      if (available < 4) { // Length of next block (which is an Int = 4 bytes) of data is unavailable!
+        false
+      }
+      val length = instream.readInt()
+      if (instream.available() < length) {
+        false
+      }
+      val buffer = new Array[Byte](length)
+      instream.readFully(buffer)
+      nextItem = Some(buffer)
+      true
+    }
   }
 
-  def readNext(): Array[Byte] = synchronized {
+  override def next(): Array[Byte] = synchronized {
     // TODO: Possible error case where there are not enough bytes in the stream
     // TODO: How to handle that?
-    assertOpen()
-    val length = instream.readInt()
-    HdfsUtils.checkState(length <= instream.available(), "Not enough data found in file!")
-    val buffer = new Array[Byte](length)
-    instream.readFully(buffer)
-    buffer
+    val data = nextItem.getOrElse {
+      throw new IllegalStateException("next called without calling hasNext or after hasNext " +
+        "returned false")
+    }
+    nextItem = None // Ensure the next hasNext call loads new data.
+    data
   }
 
-  def close() = synchronized {
+  override def close() = synchronized {
     closed = true
     instream.close()
   }
 
-  def assertOpen() {
+  private def assertOpen() {
     HdfsUtils.checkState(!closed, "Stream is closed. Create a new Reader to read from the " +
       "file.")
   }
+
 }
