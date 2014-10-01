@@ -16,7 +16,7 @@
  */
 package org.apache.spark.streaming.storage
 
-class HdfsSequentialReader(val path: String) {
+private[streaming] class HdfsSequentialReader(val path: String) {
 
   val instream = HdfsUtils.getInputStream(path)
   var closed = false

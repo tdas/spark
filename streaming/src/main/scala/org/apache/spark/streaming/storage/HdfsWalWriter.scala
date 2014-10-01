@@ -16,7 +16,7 @@
  */
 package org.apache.spark.streaming.storage
 
-class HdfsWalWriter(val path: String) {
+private[streaming] class HdfsWalWriter(val path: String) {
   val stream = HdfsUtils.getOutputStream(path)
   var nextOffset = stream.getPos
   var closed = false

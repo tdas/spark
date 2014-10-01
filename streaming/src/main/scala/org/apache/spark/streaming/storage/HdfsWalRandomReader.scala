@@ -16,7 +16,7 @@
  */
 package org.apache.spark.streaming.storage
 
-class HdfsWalRandomReader(val path: String) {
+private[streaming] class HdfsWalRandomReader(val path: String) {
 
   val instream = HdfsUtils.getInputStream(path)
   var closed = false

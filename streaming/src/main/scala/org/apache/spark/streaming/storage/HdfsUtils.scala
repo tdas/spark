@@ -19,7 +19,7 @@ package org.apache.spark.streaming.storage
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, FSDataInputStream, FSDataOutputStream, Path}
 
-object HdfsUtils {
+private[streaming] object HdfsUtils {
 
   def getOutputStream(path: String): FSDataOutputStream = {
     // HDFS is not thread-safe when getFileSystem is called, so synchronize on that
