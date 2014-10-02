@@ -18,7 +18,7 @@ package org.apache.spark.streaming.storage
 
 import java.io.Closeable
 
-private[streaming] class WriteAheadLogRandomReader(val path: String) extends Closeable {
+private[streaming] class WriteAheadLogRandomReader(path: String) extends Closeable {
 
   private val instream = HdfsUtils.getInputStream(path)
   private var closed = false
@@ -34,7 +34,7 @@ private[streaming] class WriteAheadLogRandomReader(val path: String) extends Clo
     buffer
   }
 
-  override def close() = synchronized {
+  override def close(): Unit = synchronized {
     closed = true
     instream.close()
   }
