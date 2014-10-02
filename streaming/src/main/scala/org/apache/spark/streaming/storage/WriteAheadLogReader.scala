@@ -21,8 +21,8 @@ import java.io.Closeable
 private[streaming] class WriteAheadLogReader(val path: String)
   extends Iterator[Array[Byte]] with Closeable {
 
-  val instream = HdfsUtils.getInputStream(path)
-  var closed = false
+  private val instream = HdfsUtils.getInputStream(path)
+  private var closed = false
   private var nextItem: Option[Array[Byte]] = None
 
   override def hasNext: Boolean = synchronized {

@@ -20,8 +20,8 @@ import java.io.Closeable
 
 private[streaming] class WriteAheadLogRandomReader(val path: String) extends Closeable {
 
-  val instream = HdfsUtils.getInputStream(path)
-  var closed = false
+  private val instream = HdfsUtils.getInputStream(path)
+  private var closed = false
 
   def read(segment: FileSegment): Array[Byte] = synchronized {
     assertOpen()

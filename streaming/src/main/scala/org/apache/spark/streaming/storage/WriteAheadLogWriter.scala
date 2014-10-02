@@ -19,9 +19,9 @@ package org.apache.spark.streaming.storage
 import java.io.Closeable
 
 private[streaming] class WriteAheadLogWriter(val path: String) extends Closeable {
-  val stream = HdfsUtils.getOutputStream(path)
-  var nextOffset = stream.getPos
-  var closed = false
+  private val stream = HdfsUtils.getOutputStream(path)
+  private var nextOffset = stream.getPos
+  private var closed = false
 
   // Data is always written as:
   // - Length - Long
