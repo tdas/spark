@@ -16,7 +16,7 @@
  */
 package org.apache.spark.streaming.storage
 
-import java.io.Closeable
+import java.io.{EOFException, Closeable}
 
 private[streaming] class WriteAheadLogReader(path: String)
   extends Iterator[Array[Byte]] with Closeable {
@@ -30,18 +30,16 @@ private[streaming] class WriteAheadLogReader(path: String)
     if (nextItem.isDefined) { // handle the case where hasNext is called without calling next
       true
     } else {
-      val available = instream.available()
-      if (available < 4) { // Length of next block (which is an Int = 4 bytes) of data is unavailable!
-        false
+      try {
+        val length = instream.readInt()
+        val buffer = new Array[Byte](length)
+        instream.readFully(buffer)
+        nextItem = Some(buffer)
+        true
+      } catch {
+        case e: EOFException => false
+        case e: Exception => throw e
       }
-      val length = instream.readInt()
-      if (instream.available() < length) {
-        false
-      }
-      val buffer = new Array[Byte](length)
-      instream.readFully(buffer)
-      nextItem = Some(buffer)
-      true
     }
   }
 
