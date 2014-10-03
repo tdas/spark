@@ -19,9 +19,12 @@ package org.apache.spark.streaming.storage
 import java.io.Closeable
 import java.nio.ByteBuffer
 
-private[streaming] class WriteAheadLogRandomReader(path: String) extends Closeable {
+import org.apache.hadoop.conf.Configuration
 
-  private val instream = HdfsUtils.getInputStream(path)
+private[streaming] class WriteAheadLogRandomReader(path: String, conf: Configuration)
+  extends Closeable {
+
+  private val instream = HdfsUtils.getInputStream(path, conf)
   private var closed = false
 
   def read(segment: FileSegment): ByteBuffer = synchronized {

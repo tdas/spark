@@ -19,10 +19,12 @@ package org.apache.spark.streaming.storage
 import java.io.{EOFException, Closeable}
 import java.nio.ByteBuffer
 
-private[streaming] class WriteAheadLogReader(path: String)
+import org.apache.hadoop.conf.Configuration
+
+private[streaming] class WriteAheadLogReader(path: String, conf: Configuration)
   extends Iterator[ByteBuffer] with Closeable {
 
-  private val instream = HdfsUtils.getInputStream(path)
+  private val instream = HdfsUtils.getInputStream(path, conf)
   private var closed = false
   private var nextItem: Option[ByteBuffer] = None
 
