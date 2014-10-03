@@ -20,6 +20,8 @@ import java.io.Closeable
 import java.lang.reflect.Method
 import java.nio.ByteBuffer
 
+import scala.util.Try
+
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.FSDataOutputStream
 
@@ -27,7 +29,7 @@ private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) 
   private val stream = HdfsUtils.getOutputStream(path, conf)
   private var nextOffset = stream.getPos
   private var closed = false
-  private val hflushMethod = getHflushMethod()
+  private val hflushMethod = getHflushOrSync()
 
   // Data is always written as:
   // - Length - Long
@@ -46,7 +48,7 @@ private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) 
         stream.write(data.get())
       }
     }
-    hflush()
+    hflushOrSync()
     nextOffset = stream.getPos
     segment
   }
@@ -56,16 +58,17 @@ private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) 
     stream.close()
   }
 
-  private def hflush() {
+  private def hflushOrSync() {
     hflushMethod.foreach(_.invoke(stream))
   }
 
-  private def getHflushMethod(): Option[Method] = {
-    try {
+  private def getHflushOrSync(): Option[Method] = {
+    Try {
       Some(classOf[FSDataOutputStream].getMethod("hflush"))
-    } catch {
-      case e: Exception => None
-    }
+    }.recover {
+      case e: NoSuchMethodException =>
+        Some(classOf[FSDataOutputStream].getMethod("sync"))
+    }.getOrElse(None)
   }
 
   private def assertOpen() {
