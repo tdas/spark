@@ -17,6 +17,7 @@
 package org.apache.spark.streaming.storage
 
 import java.io.Closeable
+import java.lang.reflect.Method
 import java.nio.ByteBuffer
 
 import org.apache.hadoop.conf.Configuration
@@ -26,13 +27,7 @@ private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) 
   private val stream = HdfsUtils.getOutputStream(path, conf)
   private var nextOffset = stream.getPos
   private var closed = false
-  private val hflushMethod = {
-    try {
-      Some(classOf[FSDataOutputStream].getMethod("hflush"))
-    } catch {
-      case e: Exception => None
-    }
-  }
+  private val hflushMethod = getHflushMethod()
 
   // Data is always written as:
   // - Length - Long
@@ -63,6 +58,14 @@ private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) 
 
   private def hflush() {
     hflushMethod.foreach(_.invoke(stream))
+  }
+
+  private def getHflushMethod(): Option[Method] = {
+    try {
+      Some(classOf[FSDataOutputStream].getMethod("hflush"))
+    } catch {
+      case e: Exception => None
+    }
   }
 
   private def assertOpen() {
