@@ -29,11 +29,10 @@ class WriteAheadLogRandomReaderSuite extends TestSuiteBase {
     file.deleteOnExit()
     val writtenData = TestUtils.writeData(50, file)
     val reader = new WriteAheadLogRandomReader("file:///" + file.toString)
-    var nextOffset = 0l
-    writtenData.foreach{
+    writtenData.foreach {
       x =>
-        assert(x._1 === reader.read(new FileSegment(file.toString, x._2, x._1.length)))
-        nextOffset += (x._2 + 4)
+        val length = x._1.remaining()
+        assert(x._1 === reader.read(new FileSegment(file.toString, x._2, length)))
     }
     reader.close()
   }

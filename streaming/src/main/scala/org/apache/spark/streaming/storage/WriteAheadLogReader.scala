@@ -17,13 +17,14 @@
 package org.apache.spark.streaming.storage
 
 import java.io.{EOFException, Closeable}
+import java.nio.ByteBuffer
 
 private[streaming] class WriteAheadLogReader(path: String)
-  extends Iterator[Array[Byte]] with Closeable {
+  extends Iterator[ByteBuffer] with Closeable {
 
   private val instream = HdfsUtils.getInputStream(path)
   private var closed = false
-  private var nextItem: Option[Array[Byte]] = None
+  private var nextItem: Option[ByteBuffer] = None
 
   override def hasNext: Boolean = synchronized {
     assertOpen()
@@ -34,7 +35,7 @@ private[streaming] class WriteAheadLogReader(path: String)
         val length = instream.readInt()
         val buffer = new Array[Byte](length)
         instream.readFully(buffer)
-        nextItem = Some(buffer)
+        nextItem = Some(ByteBuffer.wrap(buffer))
         true
       } catch {
         case e: EOFException => false
@@ -43,7 +44,7 @@ private[streaming] class WriteAheadLogReader(path: String)
     }
   }
 
-  override def next(): Array[Byte] = synchronized {
+  override def next(): ByteBuffer = synchronized {
     // TODO: Possible error case where there are not enough bytes in the stream
     // TODO: How to handle that?
     val data = nextItem.getOrElse {

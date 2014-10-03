@@ -17,6 +17,7 @@
 package org.apache.spark.streaming.storage
 
 import java.io.{RandomAccessFile, File}
+import java.nio.ByteBuffer
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
@@ -33,39 +34,40 @@ object TestUtils {
   // We don't want to be using the WAL writer to test the reader - it will be painful to figure
   // out where the bug is. Instead generate the file by hand and see if the WAL reader can
   // handle it.
-  def writeData(count: Int, file: File): ArrayBuffer[(Array[Byte], Long)] = {
-    val writtenData = new ArrayBuffer[(Array[Byte], Long)]()
+  def writeData(count: Int, file: File): ArrayBuffer[(ByteBuffer, Long)] = {
+    val writtenData = new ArrayBuffer[(ByteBuffer, Long)]()
     val writer = new RandomAccessFile(file, "rw")
     var i = 0
     while (i < count) {
       val data = generateRandomData()
       writtenData += ((data, writer.getFilePointer))
-      writer.writeInt(data.length)
-      writer.write(data)
+      data.rewind()
+      writer.writeInt(data.remaining())
+      writer.write(data.array())
       i += 1
     }
     writer.close()
     writtenData
   }
 
-  def readData(segments: Seq[FileSegment], file: File): Seq[Array[Byte]] = {
+  def readData(segments: Seq[FileSegment], file: File): Seq[ByteBuffer] = {
     val reader = new RandomAccessFile(file, "r")
     segments.map { x =>
       reader.seek(x.offset)
       val data = new Array[Byte](x.length)
       reader.readInt()
       reader.readFully(data)
-      data
+      ByteBuffer.wrap(data)
     }
   }
 
-  def generateRandomData(): Array[Byte] = {
+  def generateRandomData(): ByteBuffer = {
     val data = new Array[Byte](random.nextInt(50))
     random.nextBytes(data)
-    data
+    ByteBuffer.wrap(data)
   }
 
-  def writeUsingWriter(file: File, input: Seq[Array[Byte]]): Seq[FileSegment] = {
+  def writeUsingWriter(file: File, input: Seq[ByteBuffer]): Seq[FileSegment] = {
     val writer = new WriteAheadLogWriter(file.toString)
     val segments = input.map(writer.write)
     writer.close()

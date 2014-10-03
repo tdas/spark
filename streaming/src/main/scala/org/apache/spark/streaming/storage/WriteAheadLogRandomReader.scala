@@ -17,13 +17,14 @@
 package org.apache.spark.streaming.storage
 
 import java.io.Closeable
+import java.nio.ByteBuffer
 
 private[streaming] class WriteAheadLogRandomReader(path: String) extends Closeable {
 
   private val instream = HdfsUtils.getInputStream(path)
   private var closed = false
 
-  def read(segment: FileSegment): Array[Byte] = synchronized {
+  def read(segment: FileSegment): ByteBuffer = synchronized {
     assertOpen()
     instream.seek(segment.offset)
     val nextLength = instream.readInt()
@@ -31,7 +32,7 @@ private[streaming] class WriteAheadLogRandomReader(path: String) extends Closeab
       "Expected message length to be " + segment.length + ", " + "but was " + nextLength)
     val buffer = new Array[Byte](nextLength)
     instream.readFully(buffer)
-    buffer
+    ByteBuffer.wrap(buffer)
   }
 
   override def close(): Unit = synchronized {

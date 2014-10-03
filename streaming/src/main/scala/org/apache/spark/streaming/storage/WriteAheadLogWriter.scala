@@ -17,21 +17,40 @@
 package org.apache.spark.streaming.storage
 
 import java.io.Closeable
+import java.nio.ByteBuffer
+
+import org.apache.hadoop.fs.FSDataOutputStream
 
 private[streaming] class WriteAheadLogWriter(path: String) extends Closeable {
   private val stream = HdfsUtils.getOutputStream(path)
   private var nextOffset = stream.getPos
   private var closed = false
+  private val hflushMethod = {
+    try {
+      Some(classOf[FSDataOutputStream].getMethod("hflush", new Array[Class[Object]](0): _*))
+    } catch {
+      case e: Exception => None
+    }
+  }
 
   // Data is always written as:
   // - Length - Long
   // - Data - of length = Length
-  def write(data: Array[Byte]): FileSegment = synchronized {
+  def write(data: ByteBuffer): FileSegment = synchronized {
     assertOpen()
-    val segment = new FileSegment(path, nextOffset, data.length)
-    stream.writeInt(data.length)
-    stream.write(data)
-    stream.hflush()
+    val lengthToWrite = data.remaining()
+    val segment = new FileSegment(path, nextOffset, lengthToWrite)
+    stream.writeInt(lengthToWrite)
+    if (data.hasArray) {
+      stream.write(data.array())
+    } else {
+      // If the buffer is not backed by an array we need to copy the data to an array
+      data.rewind() // Rewind to ensure all data in the buffer is retrieved
+      val dataArray = new Array[Byte](lengthToWrite)
+      data.get(dataArray)
+      stream.write(dataArray)
+    }
+    hflushMethod.foreach(_.invoke(stream))
     nextOffset = stream.getPos
     segment
   }
