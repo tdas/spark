@@ -27,7 +27,7 @@ private[streaming] class WriteAheadLogWriter(path: String) extends Closeable {
   private var closed = false
   private val hflushMethod = {
     try {
-      Some(classOf[FSDataOutputStream].getMethod("hflush", new Array[Class[Object]](0): _*))
+      Some(classOf[FSDataOutputStream].getMethod("hflush"))
     } catch {
       case e: Exception => None
     }
@@ -38,6 +38,7 @@ private[streaming] class WriteAheadLogWriter(path: String) extends Closeable {
   // - Data - of length = Length
   def write(data: ByteBuffer): FileSegment = synchronized {
     assertOpen()
+    data.rewind() // Rewind to ensure all data in the buffer is retrieved
     val lengthToWrite = data.remaining()
     val segment = new FileSegment(path, nextOffset, lengthToWrite)
     stream.writeInt(lengthToWrite)
@@ -45,7 +46,6 @@ private[streaming] class WriteAheadLogWriter(path: String) extends Closeable {
       stream.write(data.array())
     } else {
       // If the buffer is not backed by an array we need to copy the data to an array
-      data.rewind() // Rewind to ensure all data in the buffer is retrieved
       val dataArray = new Array[Byte](lengthToWrite)
       data.get(dataArray)
       stream.write(dataArray)
