@@ -21,11 +21,10 @@ import org.apache.hadoop.fs.{FSDataInputStream, FSDataOutputStream, Path}
 
 private[streaming] object HdfsUtils {
 
-  def getOutputStream(path: String): FSDataOutputStream = {
+  def getOutputStream(path: String, conf: Configuration): FSDataOutputStream = {
     // HDFS is not thread-safe when getFileSystem is called, so synchronize on that
 
     val dfsPath = new Path(path)
-    val conf = new Configuration()
     val dfs =
       this.synchronized {
         dfsPath.getFileSystem(conf)
@@ -45,10 +44,10 @@ private[streaming] object HdfsUtils {
     stream
   }
 
-  def getInputStream(path: String): FSDataInputStream = {
+  def getInputStream(path: String, conf: Configuration): FSDataInputStream = {
     val dfsPath = new Path(path)
     val dfs = this.synchronized {
-      dfsPath.getFileSystem(new Configuration())
+      dfsPath.getFileSystem(conf)
     }
     val instream = dfs.open(dfsPath)
     instream
