@@ -21,19 +21,24 @@ import scala.collection.mutable.{HashMap, SynchronizedMap, SynchronizedQueue}
 import scala.language.existentials
 
 import akka.actor._
-import org.apache.spark.{Logging, SparkEnv, SparkException}
+import org.apache.hadoop.conf.Configuration
+import org.apache.spark.{SparkConf, Logging, SparkEnv, SparkException}
 import org.apache.spark.SparkContext._
 import org.apache.spark.storage.StreamBlockId
 import org.apache.spark.streaming.{StreamingContext, Time}
 import org.apache.spark.streaming.receiver.{Receiver, ReceiverSupervisorImpl, StopReceiver}
-import org.apache.spark.util.AkkaUtils
+import org.apache.spark.streaming.storage.{WriteAheadLogManager, FileSegment}
+import org.apache.spark.util.Utils
+import org.apache.hadoop.fs.Path
+import java.nio.ByteBuffer
 
 /** Information about blocks received by the receiver */
 private[streaming] case class ReceivedBlockInfo(
     streamId: Int,
     blockId: StreamBlockId,
     numRecords: Long,
-    metadata: Any
+    metadata: Any,
+    fileSegmentOption: Option[FileSegment]
   )
 
 /**
@@ -53,6 +58,28 @@ private[streaming] case class ReportError(streamId: Int, message: String, error:
 private[streaming] case class DeregisterReceiver(streamId: Int, msg: String, error: String)
   extends ReceiverTrackerMessage
 
+
+class ReceivedBlockInfoCheckpointer(
+    logDirectory: String, conf: SparkConf, hadoopConf: Configuration) {
+
+  private val logManager = new WriteAheadLogManager(logDirectory, conf, hadoopConf)
+
+  def read(): Iterator[ReceivedBlockInfo] = {
+    logManager.readFromLog().map { byteBuffer =>
+      Utils.deserialize[ReceivedBlockInfo](byteBuffer.array)
+    }
+  }
+
+  def write(receivedBlockInfo: ReceivedBlockInfo) {
+    val bytes = Utils.serialize(receivedBlockInfo)
+    logManager.writeToLog(ByteBuffer.wrap(bytes))
+  }
+
+  def clear(threshTime: Long) {
+    logManager.clear(threshTime)
+  }
+}
+
 /**
  * This class manages the execution of the receivers of NetworkInputDStreams. Instance of
  * this class must be created after all input streams have been added and StreamingContext.start()
@@ -61,19 +88,31 @@ private[streaming] case class DeregisterReceiver(streamId: Int, msg: String, err
 private[streaming]
 class ReceiverTracker(ssc: StreamingContext) extends Logging {
 
-  val receiverInputStreams = ssc.graph.getReceiverInputStreams()
-  val receiverInputStreamMap = Map(receiverInputStreams.map(x => (x.id, x)): _*)
-  val receiverExecutor = new ReceiverLauncher()
-  val receiverInfo = new HashMap[Int, ReceiverInfo] with SynchronizedMap[Int, ReceiverInfo]
-  val receivedBlockInfo = new HashMap[Int, SynchronizedQueue[ReceivedBlockInfo]]
+  private val receiverInputStreams = ssc.graph.getReceiverInputStreams()
+  private val receiverInputStreamMap = Map(receiverInputStreams.map(x => (x.id, x)): _*)
+  private val receiverExecutor = new ReceiverLauncher()
+  private val receiverInfo = new HashMap[Int, ReceiverInfo] with SynchronizedMap[Int, ReceiverInfo]
+  private val receivedBlockInfo = new HashMap[Int, SynchronizedQueue[ReceivedBlockInfo]]
     with SynchronizedMap[Int, SynchronizedQueue[ReceivedBlockInfo]]
-  val timeout = AkkaUtils.askTimeout(ssc.conf)
-  val listenerBus = ssc.scheduler.listenerBus
+  private val listenerBus = ssc.scheduler.listenerBus
+  private val receivedBlockCheckpointerOption = Option(ssc.checkpointDir) map { _ =>
+    new ReceivedBlockInfoCheckpointer(
+      new Path(ssc.checkpointDir, "receivedBlockMetadata").toString,
+      ssc.sparkContext.conf,
+      ssc.sparkContext.hadoopConfiguration
+    )
+  }
 
   // actor is created when generator starts.
   // This not being null means the tracker has been started and not stopped
   var actor: ActorRef = null
   var currentTime: Time = null
+
+  receivedBlockCheckpointerOption.foreach { checkpointer =>
+    checkpointer.read().foreach { info =>
+      getReceivedBlockInfoQueue(info.streamId) += info
+    }
+  }
 
   /** Start the actor and receiver execution thread. */
   def start() = synchronized {
@@ -126,7 +165,7 @@ class ReceiverTracker(ssc: StreamingContext) extends Logging {
     }
     receiverInfo(streamId) = ReceiverInfo(
       streamId, s"${typ}-${streamId}", receiverActor, true, host)
-    ssc.scheduler.listenerBus.post(StreamingListenerReceiverStarted(receiverInfo(streamId)))
+    listenerBus.post(StreamingListenerReceiverStarted(receiverInfo(streamId)))
     logInfo("Registered receiver for stream " + streamId + " from " + sender.path.address)
   }
 
@@ -140,7 +179,7 @@ class ReceiverTracker(ssc: StreamingContext) extends Logging {
         ReceiverInfo(streamId, "", null, false, "", lastErrorMessage = message, lastError = error)
     }
     receiverInfo(streamId) = newReceiverInfo
-    ssc.scheduler.listenerBus.post(StreamingListenerReceiverStopped(receiverInfo(streamId)))
+    listenerBus.post(StreamingListenerReceiverStopped(receiverInfo(streamId)))
     val messageWithError = if (error != null && !error.isEmpty) {
       s"$message - $error"
     } else {
@@ -150,10 +189,10 @@ class ReceiverTracker(ssc: StreamingContext) extends Logging {
   }
 
   /** Add new blocks for the given stream */
-  def addBlocks(receivedBlockInfo: ReceivedBlockInfo) {
+  def addBlock(receivedBlockInfo: ReceivedBlockInfo) {
+    receivedBlockCheckpointerOption.foreach { _.write(receivedBlockInfo) }
     getReceivedBlockInfoQueue(receivedBlockInfo.streamId) += receivedBlockInfo
-    logDebug("Stream " + receivedBlockInfo.streamId + " received new blocks: " +
-      receivedBlockInfo.blockId)
+    logDebug(s"Stream ${receivedBlockInfo.streamId} received block ${receivedBlockInfo.blockId}")
   }
 
   /** Report error sent by a receiver */
@@ -166,7 +205,7 @@ class ReceiverTracker(ssc: StreamingContext) extends Logging {
         ReceiverInfo(streamId, "", null, false, "", lastErrorMessage = message, lastError = error)
     }
     receiverInfo(streamId) = newReceiverInfo
-    ssc.scheduler.listenerBus.post(StreamingListenerReceiverError(receiverInfo(streamId)))
+    listenerBus.post(StreamingListenerReceiverError(receiverInfo(streamId)))
     val messageWithError = if (error != null && !error.isEmpty) {
       s"$message - $error"
     } else {
@@ -187,7 +226,7 @@ class ReceiverTracker(ssc: StreamingContext) extends Logging {
         registerReceiver(streamId, typ, host, receiverActor, sender)
         sender ! true
       case AddBlock(receivedBlockInfo) =>
-        addBlocks(receivedBlockInfo)
+        addBlock(receivedBlockInfo)
       case ReportError(streamId, message, error) =>
         reportError(streamId, message, error)
       case DeregisterReceiver(streamId, message, error) =>

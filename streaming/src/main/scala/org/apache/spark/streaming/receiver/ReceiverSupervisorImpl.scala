@@ -35,6 +35,7 @@ import org.apache.spark.storage.StreamBlockId
 import org.apache.spark.streaming.scheduler.DeregisterReceiver
 import org.apache.spark.streaming.scheduler.AddBlock
 import org.apache.spark.streaming.scheduler.RegisterReceiver
+import org.apache.spark.streaming.storage._
 
 /**
  * Concrete implementation of [[org.apache.spark.streaming.receiver.ReceiverSupervisor]]
@@ -47,9 +48,8 @@ private[streaming] class ReceiverSupervisorImpl(
     env: SparkEnv
   ) extends ReceiverSupervisor(receiver, env.conf) with Logging {
 
-  private val blockManager = env.blockManager
-
-  private val storageLevel = receiver.storageLevel
+  private val receivedBlockHandler =
+    new BlockManagerBasedBlockHandler(env.blockManager, receiver.streamId, receiver.storageLevel)
 
   /** Remote Akka actor for the ReceiverTracker */
   private val trackerActor = {
@@ -108,11 +108,7 @@ private[streaming] class ReceiverSupervisorImpl(
       optionalMetadata: Option[Any],
       optionalBlockId: Option[StreamBlockId]
     ) {
-    val blockId = optionalBlockId.getOrElse(nextBlockId)
-    val time = System.currentTimeMillis
-    blockManager.putArray(blockId, arrayBuffer.toArray[Any], storageLevel, tellMaster = true)
-    logDebug("Pushed block " + blockId + " in " + (System.currentTimeMillis - time)  + " ms")
-    reportPushedBlock(blockId, arrayBuffer.size, optionalMetadata)
+    pushAndReportBlock(ArrayBufferBlock(arrayBuffer), optionalMetadata, optionalBlockId)
   }
 
   /** Store a iterator of received data as a data block into Spark's memory. */
@@ -121,11 +117,7 @@ private[streaming] class ReceiverSupervisorImpl(
       optionalMetadata: Option[Any],
       optionalBlockId: Option[StreamBlockId]
     ) {
-    val blockId = optionalBlockId.getOrElse(nextBlockId)
-    val time = System.currentTimeMillis
-    blockManager.putIterator(blockId, iterator, storageLevel, tellMaster = true)
-    logDebug("Pushed block " + blockId + " in " + (System.currentTimeMillis - time)  + " ms")
-    reportPushedBlock(blockId, -1, optionalMetadata)
+    pushAndReportBlock(IteratorBlock(iterator), optionalMetadata, optionalBlockId)
   }
 
   /** Store the bytes of received data as a data block into Spark's memory. */
@@ -134,16 +126,30 @@ private[streaming] class ReceiverSupervisorImpl(
       optionalMetadata: Option[Any],
       optionalBlockId: Option[StreamBlockId]
     ) {
-    val blockId = optionalBlockId.getOrElse(nextBlockId)
-    val time = System.currentTimeMillis
-    blockManager.putBytes(blockId, bytes, storageLevel, tellMaster = true)
-    logDebug("Pushed block " + blockId + " in " + (System.currentTimeMillis - time)  + " ms")
-    reportPushedBlock(blockId, -1, optionalMetadata)
+    pushAndReportBlock(ByteBufferBlock(bytes), optionalMetadata, optionalBlockId)
   }
 
-  /** Report pushed block */
-  def reportPushedBlock(blockId: StreamBlockId, numRecords: Long, optionalMetadata: Option[Any]) {
-    val blockInfo = ReceivedBlockInfo(streamId, blockId, numRecords, optionalMetadata.orNull)
+  /** Store block and report it to driver */
+  def pushAndReportBlock(
+      receivedBlock: ReceivedBlock,
+      optionalMetadata: Option[Any],
+      optionalBlockId: Option[StreamBlockId]
+    ) {
+    val blockId = optionalBlockId.getOrElse(nextBlockId)
+    val numRecords = receivedBlock match {
+      case ArrayBufferBlock(arrayBuffer) => arrayBuffer.size
+      case _ => -1
+    }
+
+    val time = System.currentTimeMillis
+    val fileSegmentOption = receivedBlockHandler.store(blockId, receivedBlock) match {
+      case f: FileSegment => Some(f)
+      case _ => None
+    }
+    logDebug("Pushed block " + blockId + " in " + (System.currentTimeMillis - time) + " ms")
+
+    val blockInfo = ReceivedBlockInfo(streamId,
+      blockId, numRecords, optionalMetadata.orNull, fileSegmentOption)
     trackerActor ! AddBlock(blockInfo)
     logDebug("Reported block " + blockId)
   }
