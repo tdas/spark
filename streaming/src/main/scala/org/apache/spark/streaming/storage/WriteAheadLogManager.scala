@@ -1,17 +1,17 @@
 package org.apache.spark.streaming.storage
 
 import java.nio.ByteBuffer
-import java.util.concurrent.Executors
 
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.{ExecutionContext, Future}
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.spark.{Logging, SparkConf}
+import org.apache.spark.util.Utils
 
-class WriteAheadLogManager(logDirectory: String, conf: SparkConf, hadoopConf: Configuration)
-  extends Logging {
+private[streaming] class WriteAheadLogManager(logDirectory: String, conf: SparkConf,
+    hadoopConf: Configuration, threadPoolName: String = "WriteAheadLogManager") extends Logging {
 
   private case class LogInfo(startTime: Long, endTime: Long, path: String)
 
@@ -21,8 +21,9 @@ class WriteAheadLogManager(logDirectory: String, conf: SparkConf, hadoopConf: Co
     conf.getInt("spark.streaming.wal.maxRetries", 3)
   private val pastLogs = new ArrayBuffer[LogInfo]
   implicit private val executionContext =
-    ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(2))
+    ExecutionContext.fromExecutorService(Utils.newDaemonFixedThreadPool(1, threadPoolName))
 
+  private var currentLogPath: String = null
   private var currentLogWriter: WriteAheadLogWriter = null
   private var currentLogWriterStartTime: Long = -1L
 
@@ -84,9 +85,10 @@ class WriteAheadLogManager(logDirectory: String, conf: SparkConf, hadoopConf: Co
     val currentTime = System.currentTimeMillis
     if (currentLogWriter == null ||
       currentTime - currentLogWriterStartTime > logWriterChangeIntervalSeconds * 1000) {
-      pastLogs += LogInfo(currentLogWriterStartTime, currentTime, currentLogWriter.path)
+      pastLogs += LogInfo(currentLogWriterStartTime, currentTime, currentLogPath)
       val newLogPath = new Path(logDirectory, s"data-$currentTime".toString)
-      currentLogWriter = new WriteAheadLogWriter(newLogPath.toString, hadoopConf)
+      currentLogPath = newLogPath.toString
+      currentLogWriter = new WriteAheadLogWriter(currentLogPath, hadoopConf)
       currentLogWriterStartTime = currentTime
     }
     currentLogWriter
@@ -98,11 +100,13 @@ class WriteAheadLogManager(logDirectory: String, conf: SparkConf, hadoopConf: Co
   }
 }
 
-object WriteAheadLogManager {
+private[storage] object WriteAheadLogManager {
   def logsToIterator(
       chronologicallySortedLogFiles: Seq[String],
       hadoopConf: Configuration
     ): Iterator[ByteBuffer] = {
-    chronologicallySortedLogFiles map { new WriteAheadLogReader(_, hadoopConf) } flatMap { x => x }
+    chronologicallySortedLogFiles.iterator.map { file =>
+      new WriteAheadLogReader(file, hadoopConf)
+    } flatMap { x => x }
   }
 }

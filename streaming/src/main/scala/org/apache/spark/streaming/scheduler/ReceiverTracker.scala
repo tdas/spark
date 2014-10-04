@@ -58,11 +58,11 @@ private[streaming] case class ReportError(streamId: Int, message: String, error:
 private[streaming] case class DeregisterReceiver(streamId: Int, msg: String, error: String)
   extends ReceiverTrackerMessage
 
-
 class ReceivedBlockInfoCheckpointer(
     logDirectory: String, conf: SparkConf, hadoopConf: Configuration) {
 
-  private val logManager = new WriteAheadLogManager(logDirectory, conf, hadoopConf)
+  private val logManager = new WriteAheadLogManager(
+    logDirectory, conf, hadoopConf, "ReceiverTracker.WriteAheadLogManager")
 
   def read(): Iterator[ReceivedBlockInfo] = {
     logManager.readFromLog().map { byteBuffer =>

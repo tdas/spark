@@ -1,18 +1,17 @@
 package org.apache.spark.streaming.storage
 
-import scala.language.postfixOps
-
 import java.nio.ByteBuffer
-import java.util.concurrent.Executors
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.language.postfixOps
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.spark.{Logging, SparkConf}
 import org.apache.spark.storage.{BlockManager, StorageLevel, StreamBlockId}
+import org.apache.spark.util.Utils
 
 private[streaming] sealed trait ReceivedBlock
 private[streaming] case class ArrayBufferBlock(arrayBuffer: ArrayBuffer[_]) extends ReceivedBlock
@@ -56,14 +55,14 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
 
   private val logManager = new WriteAheadLogManager(
     new Path(checkpointDir, new Path("receivedData", streamId.toString)).toString,
-    conf, hadoopConf
+    conf, hadoopConf, "WriteAheadLogBasedHandler.WriteAheadLogManager"
   )
 
   private val blockStoreTimeout =
     conf.getInt("spark.streaming.receiver.blockStoreTimeout", 30) seconds
 
-  implicit private val executionContext =
-    ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(2))
+  implicit private val executionContext = ExecutionContext.fromExecutorService(
+    Utils.newDaemonFixedThreadPool(1, "WriteAheadLogBasedBlockHandler"))
   
   def store(blockId: StreamBlockId, receivedBlock: ReceivedBlock): Option[AnyRef] = {
     val serializedBlock = receivedBlock match {
