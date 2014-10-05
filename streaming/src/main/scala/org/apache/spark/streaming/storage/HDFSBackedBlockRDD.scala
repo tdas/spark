@@ -25,7 +25,7 @@ import org.apache.spark.storage.BlockId
 import org.apache.spark.{Partition, SparkContext, SparkEnv, TaskContext}
 
 private[spark]
-class HDFSBackedBlockRDDPartition(val blockId: BlockId, idx: Int,val segment: FileSegment)
+class HDFSBackedBlockRDDPartition(val blockId: BlockId, idx: Int, val segment: FileSegment)
   extends Partition {
   val index = idx
 }
