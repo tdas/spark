@@ -19,15 +19,14 @@ package org.apache.spark.streaming.storage
 import scala.reflect.ClassTag
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.io.serializer.Deserializer
 
 import org.apache.spark.rdd.BlockRDD
 import org.apache.spark.storage.BlockId
 import org.apache.spark.{Partition, SparkContext, SparkEnv, TaskContext}
 
 private[spark]
-class HDFSBackedBlockRDDPartition(val blockId: BlockId, idx: Int,
-  val segment: FileSegment) extends Partition {
+class HDFSBackedBlockRDDPartition(val blockId: BlockId, idx: Int,val segment: FileSegment)
+  extends Partition {
   val index = idx
 }
 
@@ -41,7 +40,6 @@ class HDFSBackedBlockRDD[T: ClassTag](
 
   override def getPartitions: Array[Partition] = {
     assertValid()
-    var i = 0
     (0 until blockIds.size).map { i =>
       new HDFSBackedBlockRDDPartition(blockIds(i), i, segments(i))
     }.toArray
