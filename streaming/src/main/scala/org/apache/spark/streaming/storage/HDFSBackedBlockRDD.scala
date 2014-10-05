@@ -57,10 +57,13 @@ class HDFSBackedBlockRDD[T: ClassTag](
       case Some(block) => block.data.asInstanceOf[Iterator[T]]
       // Data not found in Block Manager, grab it from HDFS
       case None =>
-        // Perhaps we should cache readers at some point
+        // TODO: Perhaps we should cache readers at some point?
         val reader = new WriteAheadLogRandomReader(partition.segment.path, hadoopConf)
-        blockManager.dataDeserialize(blockId, reader.read(partition.segment))
-          .asInstanceOf[Iterator[T]]
+        val dataRead = reader.read(partition.segment)
+        reader.close()
+        blockManager.dataDeserialize(blockId, dataRead).asInstanceOf[Iterator[T]]
+        // TODO: Should we put the data back into the Block Manager? How to get the persistance
+        // TODO: level though
     }
   }
 }
