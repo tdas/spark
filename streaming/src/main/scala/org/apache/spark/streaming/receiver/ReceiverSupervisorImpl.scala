@@ -142,7 +142,7 @@ private[streaming] class ReceiverSupervisorImpl(
     }
 
     val time = System.currentTimeMillis
-    val fileSegmentOption = receivedBlockHandler.store(blockId, receivedBlock) match {
+    val fileSegmentOption = receivedBlockHandler.storeBlock(blockId, receivedBlock) match {
       case f: FileSegment => Some(f)
       case _ => None
     }

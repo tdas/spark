@@ -19,8 +19,8 @@ private[streaming] case class IteratorBlock(iterator: Iterator[_]) extends Recei
 private[streaming] case class ByteBufferBlock(byteBuffer: ByteBuffer) extends ReceivedBlock
 
 private[streaming] trait ReceivedBlockHandler {
-  def store(blockId: StreamBlockId, receivedBlock: ReceivedBlock): Option[AnyRef]
-  def clear(threshTime: Long) { }
+  def storeBlock(blockId: StreamBlockId, receivedBlock: ReceivedBlock): Option[AnyRef]
+  def clearOldBlocks(threshTime: Long)
 }
 
 private[streaming] class BlockManagerBasedBlockHandler(
@@ -29,7 +29,7 @@ private[streaming] class BlockManagerBasedBlockHandler(
     storageLevel: StorageLevel
   ) extends ReceivedBlockHandler {
   
-  def store(blockId: StreamBlockId, receivedBlock: ReceivedBlock): Option[AnyRef] = {
+  def storeBlock(blockId: StreamBlockId, receivedBlock: ReceivedBlock): Option[AnyRef] = {
     receivedBlock match {
       case ArrayBufferBlock(arrayBuffer) =>
         blockManager.putIterator(blockId, arrayBuffer.iterator, storageLevel, tellMaster = true)
@@ -42,6 +42,11 @@ private[streaming] class BlockManagerBasedBlockHandler(
     }
     None
   }
+
+  def clearOldBlocks(threshTime: Long) {
+    // this is not used as blocks inserted into the BlockManager are cleared by DStream's clearing
+    // of BlockRDDs.
+  }
 }
 
 private[streaming] class WriteAheadLogBasedBlockHandler(
@@ -53,18 +58,23 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
     checkpointDir: String
   ) extends ReceivedBlockHandler with Logging {
 
+  private val blockStoreTimeout = conf.getInt(
+    "spark.streaming.receiver.blockStoreTimeout", 30).seconds
+  private val rotationInterval = conf.getInt(
+    "spark.streaming.receiver.writeAheadLog.rotationInterval", 60)
+  private val maxFailures = conf.getInt(
+    "spark.streaming.receiver.writeAheadLog.maxFailures", 3)
+
   private val logManager = new WriteAheadLogManager(
     new Path(checkpointDir, new Path("receivedData", streamId.toString)).toString,
-    conf, hadoopConf, "WriteAheadLogBasedHandler.WriteAheadLogManager"
+    hadoopConf, rotationInterval, maxFailures,
+    "WriteAheadLogBasedHandler.WriteAheadLogManager"
   )
-
-  private val blockStoreTimeout =
-    conf.getInt("spark.streaming.receiver.blockStoreTimeout", 30) seconds
 
   implicit private val executionContext = ExecutionContext.fromExecutorService(
     Utils.newDaemonFixedThreadPool(1, "WriteAheadLogBasedBlockHandler"))
   
-  def store(blockId: StreamBlockId, receivedBlock: ReceivedBlock): Option[AnyRef] = {
+  def storeBlock(blockId: StreamBlockId, receivedBlock: ReceivedBlock): Option[AnyRef] = {
     val serializedBlock = receivedBlock match {
       case ArrayBufferBlock(arrayBuffer) =>
         blockManager.dataSerialize(blockId, arrayBuffer.iterator)
@@ -86,5 +96,9 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
     } yield fileSegment
 
     Some(Await.result(combinedFuture, blockStoreTimeout))
+  }
+
+  def clearOldBlocks(threshTime: Long) {
+    logManager.clearOldLogs(threshTime)
   }
 }

@@ -62,7 +62,7 @@ class ReceivedBlockInfoCheckpointer(
     logDirectory: String, conf: SparkConf, hadoopConf: Configuration) {
 
   private val logManager = new WriteAheadLogManager(
-    logDirectory, conf, hadoopConf, "ReceiverTracker.WriteAheadLogManager")
+    logDirectory, hadoopConf, threadPoolName = "ReceiverTracker.WriteAheadLogManager")
 
   def read(): Iterator[ReceivedBlockInfo] = {
     logManager.readFromLog().map { byteBuffer =>
@@ -76,7 +76,7 @@ class ReceivedBlockInfoCheckpointer(
   }
 
   def clear(threshTime: Long) {
-    logManager.clear(threshTime)
+    logManager.clearOldLogs(threshTime)
   }
 }
 

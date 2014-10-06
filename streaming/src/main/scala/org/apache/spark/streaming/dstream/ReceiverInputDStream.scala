@@ -40,7 +40,8 @@ abstract class ReceiverInputDStream[T: ClassTag](@transient ssc_ : StreamingCont
   extends InputDStream[T](ssc_) {
 
   /** Keeps all received blocks information */
-  private lazy val receivedBlockInfo = new HashMap[Time, Array[ReceivedBlockInfo]]
+  private[streaming] lazy val receivedBlockInfo = new HashMap[Time, Array[ReceivedBlockInfo]]
+  private[streaming] override val checkpointData = new ReceiverInputDStreamCheckpointData(this)
 
   /** This is an unique identifier for the network input stream. */
   val id = ssc.getNewReceiverStreamId()
@@ -91,4 +92,26 @@ abstract class ReceiverInputDStream[T: ClassTag](@transient ssc_ : StreamingCont
       (time - rememberDuration) + ": " + oldReceivedBlocks.keys.mkString(", "))
   }
 }
+
+private[streaming] class ReceiverInputDStreamCheckpointData[T: ClassTag](
+    dstream: ReceiverInputDStream[T]) extends DStreamCheckpointData[T](dstream) {
+
+  private var timeToReceivedBlockInfo: Seq[(Time, Array[ReceivedBlockInfo])] = _
+
+  override def update(time: Time) {
+    timeToReceivedBlockInfo = dstream.receivedBlockInfo.toSeq
+  }
+
+  override def cleanup(time: Time) {
+    // not required, as block info copied in whole every time update is called
+  }
+
+  override def restore() {
+    Option(timeToReceivedBlockInfo).foreach { blockInfo =>
+      dstream.receivedBlockInfo.clear()
+      dstream.receivedBlockInfo ++= blockInfo
+    }
+  }
+}
+
 

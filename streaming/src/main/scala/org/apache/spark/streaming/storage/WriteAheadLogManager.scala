@@ -7,18 +7,20 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
-import org.apache.spark.{Logging, SparkConf}
+import org.apache.spark.Logging
+import org.apache.spark.streaming.storage.WriteAheadLogManager._
+import org.apache.spark.streaming.util.{Clock, ManualClock, SystemClock}
 import org.apache.spark.util.Utils
 
-private[streaming] class WriteAheadLogManager(logDirectory: String, conf: SparkConf,
-    hadoopConf: Configuration, threadPoolName: String = "WriteAheadLogManager") extends Logging {
+private[streaming] class WriteAheadLogManager(
+    logDirectory: String,
+    hadoopConf: Configuration,
+    rollingIntervalSecs: Int = 60,
+    maxFailures: Int = 3,
+    threadPoolName: String = "WriteAheadLogManager",
+    clock: Clock = new SystemClock
+  ) extends Logging {
 
-  private case class LogInfo(startTime: Long, endTime: Long, path: String)
-
-  private val logWriterChangeIntervalSeconds =
-    conf.getInt("spark.streaming.wal.interval", 60)
-  private val logWriterMaxFailures =
-    conf.getInt("spark.streaming.wal.maxRetries", 3)
   private val pastLogs = new ArrayBuffer[LogInfo]
   implicit private val executionContext =
     ExecutionContext.fromExecutorService(Utils.newDaemonFixedThreadPool(1, threadPoolName))
@@ -26,21 +28,24 @@ private[streaming] class WriteAheadLogManager(logDirectory: String, conf: SparkC
   private var currentLogPath: String = null
   private var currentLogWriter: WriteAheadLogWriter = null
   private var currentLogWriterStartTime: Long = -1L
+  private var currentLogWriterStopTime: Long = -1L
+
+  recoverPastLogs()
 
   def writeToLog(byteBuffer: ByteBuffer): FileSegment = synchronized {
+    var fileSegment: FileSegment = null
     var failures = 0
     var lastException: Exception = null
-    var fileSegment: FileSegment = null
     var succeeded = false
-    while (!succeeded && failures < logWriterMaxFailures) {
+    while (!succeeded && failures < maxFailures) {
       try {
-        fileSegment = logWriter.write(byteBuffer)
+        fileSegment = getLogWriter.write(byteBuffer)
         succeeded = true
       } catch {
         case ex: Exception =>
           lastException = ex
           logWarning("Failed to ...")
-          reset()
+          resetWriter()
           failures += 1
       }
     }
@@ -51,10 +56,10 @@ private[streaming] class WriteAheadLogManager(logDirectory: String, conf: SparkC
   }
 
   def readFromLog(): Iterator[ByteBuffer] = {
-    WriteAheadLogManager.logsToIterator(pastLogs sortBy { _.startTime} map { _.path}, hadoopConf)
+    logsToIterator(pastLogs.map{ _.path}, hadoopConf)
   }
 
-  def clear(threshTime: Long): Unit = {
+  def clearOldLogs(threshTime: Long): Unit = {
     // Get the log files that are older than the threshold time, while accounting for possible
     // time skew between the node issues the threshTime (say, driver node), and the local time at
     // the node this is being executed (say, worker node)
@@ -72,7 +77,8 @@ private[streaming] class WriteAheadLogManager(logDirectory: String, conf: SparkC
           synchronized { pastLogs -= logInfo }
           logDebug(s"Cleared log file $logInfo")
         } catch {
-          case ex: Exception => logWarning("Could not delete ...")
+          case ex: Exception =>
+            logWarning(s"Error clearing log file $logInfo", ex)
         }
       }
       logInfo(s"Cleared log files in $logDirectory older than $threshTime")
@@ -81,31 +87,97 @@ private[streaming] class WriteAheadLogManager(logDirectory: String, conf: SparkC
     Future { deleteFiles() }
   }
 
-  private def logWriter: WriteAheadLogWriter = synchronized {
-    val currentTime = System.currentTimeMillis
-    if (currentLogWriter == null ||
-      currentTime - currentLogWriterStartTime > logWriterChangeIntervalSeconds * 1000) {
-      pastLogs += LogInfo(currentLogWriterStartTime, currentTime, currentLogPath)
-      val newLogPath = new Path(logDirectory, s"data-$currentTime".toString)
+  private def getLogWriter: WriteAheadLogWriter = synchronized {
+    val currentTime = clock.currentTime()
+    if (currentLogPath == null || currentTime > currentLogWriterStopTime) {
+      resetWriter()
+      if (currentLogPath != null) {
+        pastLogs += LogInfo(currentLogWriterStartTime, currentLogWriterStopTime, currentLogPath)
+      }
+      currentLogWriterStartTime = currentTime
+      currentLogWriterStopTime = currentTime + (rollingIntervalSecs * 1000)
+      val newLogPath = new Path(logDirectory,
+        timeToLogFile(currentLogWriterStartTime, currentLogWriterStopTime))
       currentLogPath = newLogPath.toString
       currentLogWriter = new WriteAheadLogWriter(currentLogPath, hadoopConf)
-      currentLogWriterStartTime = currentTime
     }
     currentLogWriter
   }
 
-  private def reset(): Unit = synchronized {
-    currentLogWriter.close()
-    currentLogWriter = null
+  private def recoverPastLogs(): Unit = synchronized {
+    val logDirectoryPath = new Path(logDirectory)
+    val fs = logDirectoryPath.getFileSystem(hadoopConf)
+    if (fs.exists(logDirectoryPath) && fs.getFileStatus(logDirectoryPath).isDir) {
+      val logFiles = fs.listStatus(logDirectoryPath).map { _.getPath }
+      pastLogs.clear()
+      pastLogs ++= logFilesTologInfo(logFiles)
+      logInfo(s"Recovered ${logFiles.size} log files from $logDirectory")
+      logDebug(s"Recoved files are:\n${logFiles.mkString("\n")}")
+    }
   }
+
+  private def resetWriter(): Unit = synchronized {
+    if (currentLogWriter != null) {
+      currentLogWriter.close()
+      currentLogWriter = null
+    }
+  }
+
+/*
+  private def tryMultipleTimes[T](message: String)(body: => T): T = {
+    var result: T = null.asInstanceOf[T]
+    var failures = 0
+    var lastException: Exception = null
+    var succeeded = false
+    while (!succeeded && failures < maxFailures) {
+      try {
+        result = body
+        succeeded = true
+      } catch {
+        case ex: Exception =>
+          lastException = ex
+          resetWriter()
+          failures += 1
+          logWarning(message, ex)
+      }
+    }
+    if (!succeeded) {
+      throw new Exception(s"Failed $message after $failures failures", lastException)
+    }
+    result
+  } */
 }
 
 private[storage] object WriteAheadLogManager {
+
+  case class LogInfo(startTime: Long, endTime: Long, path: String)
+
+  val logFileRegex = """log-(\d+)-(\d+)""".r
+
+  def timeToLogFile(startTime: Long, stopTime: Long): String = {
+    s"log-$startTime-$stopTime"
+  }
+
+  def logFilesTologInfo(files: Seq[Path]): Seq[LogInfo] = {
+    println("Creating log info with " + files.mkString("[","],[","]"))
+    files.flatMap { file =>
+      logFileRegex.findFirstIn(file.getName()) match {
+        case logFileRegex(startTimeStr, stopTimeStr) =>
+          val startTime = startTimeStr.toLong
+          val stopTime = stopTimeStr.toLong
+          Some(LogInfo(startTime, stopTime, file.toString))
+        case _ => None
+      }
+    }.sortBy { _.startTime }
+  }
+
   def logsToIterator(
       chronologicallySortedLogFiles: Seq[String],
       hadoopConf: Configuration
     ): Iterator[ByteBuffer] = {
+    println("Creating iterator with " + chronologicallySortedLogFiles.mkString("[", "],[", "]"))
     chronologicallySortedLogFiles.iterator.map { file =>
+      println(s"Creating log reader with $file")
       new WriteAheadLogReader(file, hadoopConf)
     } flatMap { x => x }
   }
