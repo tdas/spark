@@ -21,7 +21,7 @@ import scala.reflect.ClassTag
 import org.apache.hadoop.conf.Configuration
 
 import org.apache.spark.rdd.BlockRDD
-import org.apache.spark.storage.BlockId
+import org.apache.spark.storage.{BlockManager, StorageLevel, BlockId}
 import org.apache.spark.{Partition, SparkContext, SparkEnv, TaskContext}
 
 private[spark]
@@ -35,7 +35,8 @@ class HDFSBackedBlockRDD[T: ClassTag](
     @transient sc: SparkContext,
     @transient hadoopConf: Configuration,
     @transient override val blockIds: Array[BlockId],
-    @transient val segments: Array[FileSegment]
+    @transient val segments: Array[FileSegment],
+    @transient val persistance: StorageLevel
   ) extends BlockRDD[T](sc, blockIds) {
 
   override def getPartitions: Array[Partition] = {
@@ -59,9 +60,9 @@ class HDFSBackedBlockRDD[T: ClassTag](
         val reader = new WriteAheadLogRandomReader(partition.segment.path, hadoopConf)
         val dataRead = reader.read(partition.segment)
         reader.close()
-        blockManager.dataDeserialize(blockId, dataRead).asInstanceOf[Iterator[T]]
-        // TODO: Should we put the data back into the Block Manager? How to get the persistance
-        // TODO: level though
+        val data = blockManager.dataDeserialize(blockId, dataRead).asInstanceOf[Iterator[T]]
+        blockManager.putIterator(blockId, data, persistance)
+        data
     }
   }
 }
