@@ -21,7 +21,7 @@ import scala.reflect.ClassTag
 import org.apache.hadoop.conf.Configuration
 
 import org.apache.spark.rdd.BlockRDD
-import org.apache.spark.storage.{BlockManager, StorageLevel, BlockId}
+import org.apache.spark.storage.{StorageLevel, BlockId}
 import org.apache.spark.{Partition, SparkContext, SparkEnv, TaskContext}
 
 private[spark]
@@ -33,10 +33,10 @@ class HDFSBackedBlockRDDPartition(val blockId: BlockId, idx: Int, val segment: F
 private[spark]
 class HDFSBackedBlockRDD[T: ClassTag](
     @transient sc: SparkContext,
-    @transient hadoopConf: Configuration,
+    hadoopConf: Configuration,
     @transient override val blockIds: Array[BlockId],
     @transient val segments: Array[FileSegment],
-    @transient val persistance: StorageLevel
+    val storageLevel: StorageLevel
   ) extends BlockRDD[T](sc, blockIds) {
 
   override def getPartitions: Array[Partition] = {
@@ -61,7 +61,7 @@ class HDFSBackedBlockRDD[T: ClassTag](
         val dataRead = reader.read(partition.segment)
         reader.close()
         val data = blockManager.dataDeserialize(blockId, dataRead).asInstanceOf[Iterator[T]]
-        blockManager.putIterator(blockId, data, persistance)
+        blockManager.putIterator(blockId, data, storageLevel)
         data
     }
   }
