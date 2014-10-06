@@ -65,4 +65,8 @@ class HDFSBackedBlockRDD[T: ClassTag](
         data
     }
   }
+
+  override def getPreferredLocations(split: Partition): Seq[String] = {
+    locations_.getOrElse(split.asInstanceOf[HDFSBackedBlockRDDPartition].blockId, Seq.empty[String])
+  }
 }
