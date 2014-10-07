@@ -31,7 +31,7 @@ import org.apache.spark.{SparkEnv, TaskContext, SparkContext}
 import org.apache.spark.storage.{BlockId, StreamBlockId, StorageLevel}
 import org.apache.spark.streaming.TestSuiteBase
 
-class HDFSBackedBlockRDDSuite extends TestSuiteBase with BeforeAndAfter {
+class HDFSBackedBlockRDDSuite extends TestSuiteBase {
   val sparkContext = new SparkContext(conf)
   val hadoopConf = new Configuration()
   val blockIdCounter = new AtomicInteger(0)
