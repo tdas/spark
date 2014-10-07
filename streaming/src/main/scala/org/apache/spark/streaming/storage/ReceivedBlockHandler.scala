@@ -7,10 +7,12 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
+import WriteAheadLogBasedBlockHandler._
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.spark.{Logging, SparkConf}
 import org.apache.spark.storage.{BlockManager, StorageLevel, StreamBlockId}
+import org.apache.spark.streaming.util.{Clock, SystemClock}
 import org.apache.spark.util.Utils
 
 private[streaming] sealed trait ReceivedBlock
@@ -55,20 +57,22 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
     storageLevel: StorageLevel,
     conf: SparkConf,
     hadoopConf: Configuration,
-    checkpointDir: String
+    checkpointDir: String,
+    clock: Clock = new SystemClock
   ) extends ReceivedBlockHandler with Logging {
 
   private val blockStoreTimeout = conf.getInt(
     "spark.streaming.receiver.blockStoreTimeout", 30).seconds
-  private val rotationInterval = conf.getInt(
-    "spark.streaming.receiver.writeAheadLog.rotationInterval", 60)
+  private val rollingInterval = conf.getInt(
+    "spark.streaming.receiver.writeAheadLog.rollingInterval", 60)
   private val maxFailures = conf.getInt(
     "spark.streaming.receiver.writeAheadLog.maxFailures", 3)
 
   private val logManager = new WriteAheadLogManager(
-    new Path(checkpointDir, new Path("receivedData", streamId.toString)).toString,
-    hadoopConf, rotationInterval, maxFailures,
-    "WriteAheadLogBasedHandler.WriteAheadLogManager"
+    checkpointDirToLogDir(checkpointDir, streamId),
+    hadoopConf, rollingInterval, maxFailures,
+    threadPoolName = "WriteAheadLogBasedHandler.WriteAheadLogManager",
+    clock = clock
   )
 
   implicit private val executionContext = ExecutionContext.fromExecutorService(
@@ -100,5 +104,15 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
 
   def clearOldBlocks(threshTime: Long) {
     logManager.clearOldLogs(threshTime)
+  }
+
+  def stop() {
+    logManager.stop()
+  }
+}
+
+private[streaming] object WriteAheadLogBasedBlockHandler {
+  def checkpointDirToLogDir(checkpointDir: String, streamId: Int): String = {
+    new Path(checkpointDir, new Path("receivedData", streamId.toString)).toString
   }
 }

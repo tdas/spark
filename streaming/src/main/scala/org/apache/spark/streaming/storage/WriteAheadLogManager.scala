@@ -9,7 +9,7 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.spark.Logging
 import org.apache.spark.streaming.storage.WriteAheadLogManager._
-import org.apache.spark.streaming.util.{Clock, ManualClock, SystemClock}
+import org.apache.spark.streaming.util.{Clock, SystemClock}
 import org.apache.spark.util.Utils
 
 private[streaming] class WriteAheadLogManager(
@@ -55,17 +55,26 @@ private[streaming] class WriteAheadLogManager(
     fileSegment
   }
 
-  def readFromLog(): Iterator[ByteBuffer] = {
-    logsToIterator(pastLogs.map{ _.path}, hadoopConf)
+  def readFromLog(): Iterator[ByteBuffer] = synchronized {
+    val logFilesToRead = pastLogs.map{ _.path} ++ Option(currentLogPath)
+    println("Reading from the logs: " + logFilesToRead.mkString("\n"))
+    logFilesToRead.iterator.map { file =>
+        println(s"Creating log reader with $file")
+        new WriteAheadLogReader(file, hadoopConf)
+    } flatMap { x => x }
   }
 
+  /**
+   * Delete the log files that are older than the threshold time.
+   *
+   * Its important to note that the threshold time is based on the time stamps used in the log
+   * files, and is therefore based on the local system time. So if there is coordination necessary
+   * between the node calculating the threshTime (say, driver node), and the local system time
+   * (say, worker node), the caller has to take account of possible time skew.
+   */
   def clearOldLogs(threshTime: Long): Unit = {
-    // Get the log files that are older than the threshold time, while accounting for possible
-    // time skew between the node issues the threshTime (say, driver node), and the local time at
-    // the node this is being executed (say, worker node)
-    val maxTimeSkewMs = 60 * 1000 // 1 minute
-    val oldLogFiles = synchronized { pastLogs.filter { _.endTime < threshTime - maxTimeSkewMs } }
-    logDebug(s"Attempting to clear ${oldLogFiles.size} old log files in $logDirectory " +
+    val oldLogFiles = synchronized { pastLogs.filter { _.endTime < threshTime } }
+    println(s"Attempting to clear ${oldLogFiles.size} old log files in $logDirectory " +
       s"older than $threshTime: ${oldLogFiles.map { _.path }.mkString("\n")}")
 
     def deleteFiles() {
@@ -85,6 +94,13 @@ private[streaming] class WriteAheadLogManager(
     }
 
     Future { deleteFiles() }
+  }
+
+  def stop(): Unit = synchronized {
+    println("Stopping log manager")
+    if (currentLogWriter != null) {
+      currentLogWriter.close()
+    }
   }
 
   private def getLogWriter: WriteAheadLogWriter = synchronized {
@@ -112,12 +128,13 @@ private[streaming] class WriteAheadLogManager(
       pastLogs.clear()
       pastLogs ++= logFilesTologInfo(logFiles)
       logInfo(s"Recovered ${logFiles.size} log files from $logDirectory")
-      logDebug(s"Recoved files are:\n${logFiles.mkString("\n")}")
+      logDebug(s"Recovered files are:\n${logFiles.mkString("\n")}")
     }
   }
 
   private def resetWriter(): Unit = synchronized {
     if (currentLogWriter != null) {
+      currentLogWriter
       currentLogWriter.close()
       currentLogWriter = null
     }
@@ -169,16 +186,5 @@ private[storage] object WriteAheadLogManager {
         case _ => None
       }
     }.sortBy { _.startTime }
-  }
-
-  def logsToIterator(
-      chronologicallySortedLogFiles: Seq[String],
-      hadoopConf: Configuration
-    ): Iterator[ByteBuffer] = {
-    println("Creating iterator with " + chronologicallySortedLogFiles.mkString("[", "],[", "]"))
-    chronologicallySortedLogFiles.iterator.map { file =>
-      println(s"Creating log reader with $file")
-      new WriteAheadLogReader(file, hadoopConf)
-    } flatMap { x => x }
   }
 }
