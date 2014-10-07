@@ -84,8 +84,10 @@ class HDFSBackedBlockRDDSuite extends TestSuiteBase {
 
     val (writtenStrings, segments) = writeDataToHDFS(total, countPerBlock, file, blockIds)
 
+    val writtenToBM = new ArrayBuffer[Iterable[String]]()
     for (i <- 0 until writtenStrings.length) {
       if (i % 2 == 0 || writeAllToBM) {
+        writtenToBM += writtenStrings(i)
         blockManager.putIterator(blockIds(i), writtenStrings(i).iterator,
           StorageLevel.MEMORY_ONLY)
       }
@@ -93,10 +95,18 @@ class HDFSBackedBlockRDDSuite extends TestSuiteBase {
 
     val rdd = new HDFSBackedBlockRDD[String](sparkContext, hadoopConf, blockIds.toArray,
       segments.toArray, StorageLevel.MEMORY_ONLY)
+    rdd.test()
     val partitions = rdd.getPartitions
     // The task context is not used in this RDD directly, so ok to be null
-    val dataFromRDD = partitions.flatMap(rdd.compute(_, null))
-    assert(writtenStrings.flatten === dataFromRDD)
+    val dataFromRDD = partitions.map(rdd.compute(_, null))
+    val copiedData = dataFromRDD.map(_.duplicate)
+    // verify each partition is equal to the data pulled out
+    for(i <- 0 until writtenStrings.length) {
+      assert(writtenStrings(i) === copiedData(i)._1.toIterable)
+    }
+    assert(writtenStrings.flatten === copiedData.map(_._2.toIterable).flatten)
+    assert(writtenToBM === rdd.getBmList)
+    assert(writtenToBM.flatten === rdd.getBmList.flatten)
   }
 
   /**

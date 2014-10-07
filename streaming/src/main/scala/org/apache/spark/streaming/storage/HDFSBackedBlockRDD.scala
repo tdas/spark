@@ -16,6 +16,7 @@
  */
 package org.apache.spark.streaming.storage
 
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 import org.apache.hadoop.conf.Configuration
@@ -39,6 +40,18 @@ class HDFSBackedBlockRDD[T: ClassTag](
     val storageLevel: StorageLevel
   ) extends BlockRDD[T](sc, blockIds) {
 
+  private var isTest = false
+  private var bmList: ArrayBuffer[Iterable[T]] = ArrayBuffer.empty[Iterable[T]]
+
+  private [storage] def test() {
+    isTest = true
+    bmList = new ArrayBuffer[Iterable[T]]()
+  }
+
+  private [storage] def getBmList: ArrayBuffer[Iterable[T]] = {
+    bmList
+  }
+
   override def getPartitions: Array[Partition] = {
     assertValid()
     (0 until blockIds.size).map { i =>
@@ -48,18 +61,29 @@ class HDFSBackedBlockRDD[T: ClassTag](
 
   override def compute(split: Partition, context: TaskContext): Iterator[T] = {
     assertValid()
-    val blockManager = SparkEnv.get.blockManager
+    val blockManager = sc.env.blockManager
     val partition = split.asInstanceOf[HDFSBackedBlockRDDPartition]
     val blockId = partition.blockId
     blockManager.get(blockId) match {
       // Data is in Block Manager, grab it from there.
-      case Some(block) => block.data.asInstanceOf[Iterator[T]]
+      case Some(block) =>
+        val data = block.data.asInstanceOf[Iterator[T]]
+        if (isTest) {
+          val dataCopies = data.duplicate
+          bmList += dataCopies._1.toIterable
+          dataCopies._2
+        } else {
+          data
+        }
       // Data not found in Block Manager, grab it from HDFS
       case None =>
         // TODO: Perhaps we should cache readers at some point?
         val reader = new WriteAheadLogRandomReader(partition.segment.path, hadoopConf)
         val dataRead = reader.read(partition.segment)
         reader.close()
+        // Should we make it configurable whether we want to insert data into BM? If we don't
+        // need to insert it into BM we can avoid duplicating the iterator. This is the only
+        // option since each of
         val data = blockManager.dataDeserialize(blockId, dataRead).toIterable
         blockManager.putIterator(blockId, data.iterator, storageLevel)
         data.iterator.asInstanceOf[Iterator[T]]
