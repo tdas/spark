@@ -60,9 +60,9 @@ class HDFSBackedBlockRDD[T: ClassTag](
         val reader = new WriteAheadLogRandomReader(partition.segment.path, hadoopConf)
         val dataRead = reader.read(partition.segment)
         reader.close()
-        val data = blockManager.dataDeserialize(blockId, dataRead).asInstanceOf[Iterator[T]]
-        blockManager.putIterator(blockId, data, storageLevel)
-        data
+        val data = blockManager.dataDeserialize(blockId, dataRead).toIterable
+        blockManager.putIterator(blockId, data.iterator, storageLevel)
+        data.iterator.asInstanceOf[Iterator[T]]
     }
   }
 
