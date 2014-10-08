@@ -16,5 +16,4 @@
  */
 package org.apache.spark.streaming.storage
 
-
 private[streaming] case class FileSegment (path: String, offset: Long, length: Int)

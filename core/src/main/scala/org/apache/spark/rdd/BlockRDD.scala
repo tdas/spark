@@ -85,7 +85,7 @@ class BlockRDD[T: ClassTag](@transient sc: SparkContext, @transient val blockIds
     }
   }
 
-  protected def getBlockIdLocations: Map[BlockId, Seq[String]] = {
+  protected def getBlockIdLocations(): Map[BlockId, Seq[String]] = {
     locations_
   }
 }

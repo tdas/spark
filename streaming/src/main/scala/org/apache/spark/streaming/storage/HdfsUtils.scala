@@ -69,5 +69,4 @@ private[streaming] object HdfsUtils {
     val blockLocs = Option(dfs.getFileBlockLocations(fileStatus, 0, fileStatus.getLen))
     blockLocs.map(_.flatMap(_.getHosts))
   }
-
 }

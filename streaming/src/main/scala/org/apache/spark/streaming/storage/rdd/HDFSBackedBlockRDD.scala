@@ -83,7 +83,7 @@ class HDFSBackedBlockRDD[T: ClassTag](
 
   override def getPreferredLocations(split: Partition): Seq[String] = {
     val partition = split.asInstanceOf[HDFSBackedBlockRDDPartition]
-    val locations = getBlockIdLocations
+    val locations = getBlockIdLocations()
     locations.getOrElse(partition.blockId,
       HdfsUtils.getBlockLocations(partition.segment.path, hadoopConfiguration)
         .getOrElse(new Array[String](0)).toSeq)
