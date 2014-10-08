@@ -69,7 +69,6 @@ class HDFSBackedBlockRDDSuite extends FunSuite with BeforeAndAfter {
     doTestHDFSBackedRDD(0, 5, 20, 5)
   }
 
-
   test("Verify part of the data is in BM, and the remaining in HDFS") {
     doTestHDFSBackedRDD(3, 2, 20, 5)
   }
