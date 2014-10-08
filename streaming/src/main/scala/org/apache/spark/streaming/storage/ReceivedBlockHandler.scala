@@ -71,7 +71,7 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
   private val logManager = new WriteAheadLogManager(
     checkpointDirToLogDir(checkpointDir, streamId),
     hadoopConf, rollingInterval, maxFailures,
-    threadPoolName = "WriteAheadLogBasedHandler.WriteAheadLogManager",
+    callerName = "WriteAheadLogBasedHandler",
     clock = clock
   )
 

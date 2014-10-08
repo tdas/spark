@@ -18,6 +18,7 @@ package org.apache.spark.streaming.storage
 
 import java.io.{DataInputStream, FileInputStream, File, RandomAccessFile}
 import java.nio.ByteBuffer
+
 import scala.util.Random
 
 import scala.collection.mutable.ArrayBuffer
@@ -144,7 +145,6 @@ class WriteAheadLogSuite extends FunSuite with BeforeAndAfter {
       val data = generateRandomData(10)
       val file = new File(tempDirectory, s"log-$i-${i + 1}")
       writeDataManually(data, file)
-      println(s"Generated log file $file")
       data
     }.flatten
 
@@ -158,8 +158,6 @@ class WriteAheadLogSuite extends FunSuite with BeforeAndAfter {
     val dataToWrite = generateRandomData(100)
     writeDataUsingManager(tempDirectory, dataToWrite)
     val logFiles = getLogFilesInDirectory(tempDirectory)
-    println("==========\n" + logFiles.mkString("\n") + "\n==========\n"  )
-
     assert(logFiles.size > 1)
     val readData = readDataUsingManager(tempDirectory)
     assert(dataToWrite.toList === readData.toList)
@@ -204,7 +202,7 @@ object WriteAheadLogSuite {
   def writeDataUsingManager(logDirectory: File, data: Seq[String]) {
     val fakeClock = new ManualClock
     val manager = new WriteAheadLogManager(logDirectory.toString, hadoopConf,
-      rollingIntervalSecs = 1, clock = fakeClock)
+      rollingIntervalSecs = 1, callerName = "WriteAheadLogSuite", clock = fakeClock)
     data.foreach { item =>
       fakeClock.addToTime(500)
       manager.writeToLog(item)
@@ -218,7 +216,6 @@ object WriteAheadLogSuite {
    */
   def readDataManually(file: File, segments: Seq[FileSegment]): Seq[String] = {
     val reader = new RandomAccessFile(file, "r")
-    println("File " + file + " has " + reader.length() + " bytes ")
     segments.map { x =>
       reader.seek(x.offset)
       val data = new Array[Byte](x.length)
@@ -245,7 +242,8 @@ object WriteAheadLogSuite {
   }
 
   def readDataUsingManager(logDirectory: File): Seq[String] = {
-    val manager = new WriteAheadLogManager(logDirectory.toString, hadoopConf)
+    val manager = new WriteAheadLogManager(logDirectory.toString, hadoopConf,
+      callerName = "WriteAheadLogSuite")
     val data = manager.readFromLog().map(byteBufferToString).toSeq
     manager.stop()
     data
@@ -256,9 +254,12 @@ object WriteAheadLogSuite {
   }
 
   def getLogFilesInDirectory(directory: File): Seq[File] = {
-    println("[ " + directory.listFiles().filter(_.getName().startsWith("log-")).mkString(" | ") + " ]")
-    directory.listFiles().filter(_.getName().startsWith("log-"))
-      .sortBy(_.getName.split("-")(1).toLong)
+    if (directory.exists) {
+      directory.listFiles().filter(_.getName().startsWith("log-"))
+        .sortBy(_.getName.split("-")(1).toLong)
+    } else {
+      Seq.empty
+    }
   }
 
   def printData(data: Seq[String]) {

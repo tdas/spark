@@ -89,7 +89,7 @@ class ReceivedBlockHandlerSuite extends FunSuite with BeforeAndAfter with Matche
     blockManagerData.toList shouldEqual data.toList
 
     // Check whether the blocks written to the write ahead log are correct
-    val logFiles = getLogFiles()
+    val logFiles = getWriteAheadLogFiles()
     logFiles.size should be > 1
 
     val logData = logFiles.flatMap {
@@ -101,7 +101,7 @@ class ReceivedBlockHandlerSuite extends FunSuite with BeforeAndAfter with Matche
   test("WriteAheadLogBasedBlockHandler - clear old blocks") {
     createWriteAheadLogBasedBlockHandler()
     generateAndStoreData(receivedBlockHandler)
-    val preCleanupLogFiles = getLogFiles()
+    val preCleanupLogFiles = getWriteAheadLogFiles()
     preCleanupLogFiles.size should be > 1
 
     // this depends on the number of blocks inserted using generateAndStoreData()
@@ -110,7 +110,7 @@ class ReceivedBlockHandlerSuite extends FunSuite with BeforeAndAfter with Matche
     val cleanupThreshTime = 3000L
     receivedBlockHandler.clearOldBlocks(cleanupThreshTime)
     eventually(timeout(10000 millis), interval(10 millis)) {
-      getLogFiles().size should be < preCleanupLogFiles.size
+      getWriteAheadLogFiles().size should be < preCleanupLogFiles.size
     }
   }
 
@@ -131,7 +131,7 @@ class ReceivedBlockHandlerSuite extends FunSuite with BeforeAndAfter with Matche
     (data, blockIds)
   }
 
-  def getLogFiles(): Seq[File] = {
+  def getWriteAheadLogFiles(): Seq[File] = {
     getLogFilesInDirectory(
       new File(checkpointDirToLogDir(tempDirectory.toString, streamId)))
   }

@@ -150,7 +150,8 @@ private[streaming] class ReceiverSupervisorImpl(
 
     val blockInfo = ReceivedBlockInfo(streamId,
       blockId, numRecords, optionalMetadata.orNull, fileSegmentOption)
-    trackerActor ! AddBlock(blockInfo)
+    val future = trackerActor.ask(AddBlock(blockInfo))(askTimeout)
+    Await.result(future, askTimeout)
     logDebug("Reported block " + blockId)
   }
 

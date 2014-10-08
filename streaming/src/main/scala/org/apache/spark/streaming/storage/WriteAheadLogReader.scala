@@ -20,9 +20,10 @@ import java.io.{EOFException, Closeable}
 import java.nio.ByteBuffer
 
 import org.apache.hadoop.conf.Configuration
+import org.apache.spark.Logging
 
 private[streaming] class WriteAheadLogReader(path: String, conf: Configuration)
-  extends Iterator[ByteBuffer] with Closeable {
+  extends Iterator[ByteBuffer] with Closeable with Logging {
 
   private val instream = HdfsUtils.getInputStream(path, conf)
   private var closed = false
@@ -41,12 +42,15 @@ private[streaming] class WriteAheadLogReader(path: String, conf: Configuration)
         val buffer = new Array[Byte](length)
         instream.readFully(buffer)
         nextItem = Some(ByteBuffer.wrap(buffer))
+        logTrace("Read next item " + nextItem.get)
         true
       } catch {
         case e: EOFException =>
+          logDebug("Error reading next item, EOF reached", e)
           close()
           false
         case e: Exception =>
+          logDebug("Error reading next item, EOF reached", e)
           close()
           throw e
       }
