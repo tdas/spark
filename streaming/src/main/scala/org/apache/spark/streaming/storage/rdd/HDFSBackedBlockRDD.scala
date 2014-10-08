@@ -14,44 +14,41 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.streaming.storage
+package org.apache.spark.streaming.storage.rdd
 
-import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 import org.apache.hadoop.conf.Configuration
 
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.BlockRDD
-import org.apache.spark.storage.{StorageLevel, BlockId}
-import org.apache.spark.{Partition, SparkContext, SparkEnv, TaskContext}
+import org.apache.spark.storage.{BlockId, StorageLevel}
+import org.apache.spark.streaming.storage.{FileSegment, HdfsUtils, WriteAheadLogRandomReader}
+import org.apache.spark._
 
-private[spark]
+private[streaming]
 class HDFSBackedBlockRDDPartition(val blockId: BlockId, idx: Int, val segment: FileSegment)
   extends Partition {
   val index = idx
 }
 
-private[spark]
+private[streaming]
 class HDFSBackedBlockRDD[T: ClassTag](
     @transient sc: SparkContext,
-    hadoopConf: Configuration,
+    @transient hadoopConfiguration: Configuration,
     @transient override val blockIds: Array[BlockId],
     @transient val segments: Array[FileSegment],
+    val storeInBlockManager: Boolean,
     val storageLevel: StorageLevel
   ) extends BlockRDD[T](sc, blockIds) {
 
-  private var isTest = false
-  private var bmList: ArrayBuffer[Iterable[T]] = ArrayBuffer.empty[Iterable[T]]
-
-  private [storage] def test() {
-    isTest = true
-    bmList = new ArrayBuffer[Iterable[T]]()
+  if (blockIds.length != segments.length) {
+    throw new IllegalStateException("Number of block ids must be the same as number of segments!")
   }
 
-  private [storage] def getBmList: ArrayBuffer[Iterable[T]] = {
-    bmList
-  }
-
+  // Hadoop Configuration is not serializable, so broadcast it as a serializable.
+  val broadcastedHadoopConf = sc.broadcast(new SerializableWritable(hadoopConfiguration))
+    .asInstanceOf[Broadcast[SerializableWritable[Configuration]]]
   override def getPartitions: Array[Partition] = {
     assertValid()
     (0 until blockIds.size).map { i =>
@@ -61,36 +58,34 @@ class HDFSBackedBlockRDD[T: ClassTag](
 
   override def compute(split: Partition, context: TaskContext): Iterator[T] = {
     assertValid()
-    val blockManager = sc.env.blockManager
+    val hadoopConf = broadcastedHadoopConf.value.value
+    val blockManager = SparkEnv.get.blockManager
     val partition = split.asInstanceOf[HDFSBackedBlockRDDPartition]
     val blockId = partition.blockId
     blockManager.get(blockId) match {
       // Data is in Block Manager, grab it from there.
       case Some(block) =>
-        val data = block.data.asInstanceOf[Iterator[T]]
-        if (isTest) {
-          val dataCopies = data.duplicate
-          bmList += dataCopies._1.toIterable
-          dataCopies._2
-        } else {
-          data
-        }
+        block.data.asInstanceOf[Iterator[T]]
       // Data not found in Block Manager, grab it from HDFS
       case None =>
-        // TODO: Perhaps we should cache readers at some point?
         val reader = new WriteAheadLogRandomReader(partition.segment.path, hadoopConf)
         val dataRead = reader.read(partition.segment)
         reader.close()
-        // Should we make it configurable whether we want to insert data into BM? If we don't
-        // need to insert it into BM we can avoid duplicating the iterator. This is the only
-        // option since each of
-        val data = blockManager.dataDeserialize(blockId, dataRead).toIterable
-        blockManager.putIterator(blockId, data.iterator, storageLevel)
-        data.iterator.asInstanceOf[Iterator[T]]
+        // Currently, we support storing the data to BM only in serialized form and not in
+        // deserialized form
+        if (storeInBlockManager) {
+          blockManager.putBytes(blockId, dataRead, storageLevel)
+        }
+        dataRead.rewind()
+        blockManager.dataDeserialize(blockId, dataRead).asInstanceOf[Iterator[T]]
     }
   }
 
   override def getPreferredLocations(split: Partition): Seq[String] = {
-    locations_.getOrElse(split.asInstanceOf[HDFSBackedBlockRDDPartition].blockId, Seq.empty[String])
+    val partition = split.asInstanceOf[HDFSBackedBlockRDDPartition]
+    val locations = getBlockIdLocations
+    locations.getOrElse(partition.blockId,
+      HdfsUtils.getBlockLocations(partition.segment.path, hadoopConfiguration)
+        .getOrElse(new Array[String](0)).toSeq)
   }
 }
