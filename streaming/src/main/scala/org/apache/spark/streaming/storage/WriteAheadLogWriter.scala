@@ -55,12 +55,10 @@ private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) 
 
   override private[streaming] def close(): Unit = synchronized {
     closed = true
-    hflushOrSync()
     stream.close()
   }
 
   private def hflushOrSync() {
-    stream.getWrappedStream.flush()
     hflushMethod.foreach(_.invoke(stream))
   }
 

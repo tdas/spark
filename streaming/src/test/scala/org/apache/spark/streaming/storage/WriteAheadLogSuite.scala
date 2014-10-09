@@ -24,17 +24,30 @@ import scala.collection.mutable.ArrayBuffer
 import scala.language.implicitConversions
 
 import com.google.common.io.Files
+import org.apache.commons.lang.RandomStringUtils
 import org.apache.hadoop.conf.Configuration
-import org.scalatest.{BeforeAndAfter, FunSuite}
+import org.apache.hadoop.hdfs.MiniDFSCluster
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfter, FunSuite}
 import org.apache.commons.io.FileUtils
 import org.apache.spark.streaming.util.ManualClock
 import org.apache.spark.util.Utils
 import WriteAheadLogSuite._
 
-class WriteAheadLogSuite extends FunSuite with BeforeAndAfter {
+class WriteAheadLogSuite extends FunSuite with BeforeAndAfter with BeforeAndAfterAll {
 
   val hadoopConf = new Configuration()
   var tempDirectory: File = null
+  lazy val dfsDir = Files.createTempDir()
+  lazy val TEST_BUILD_DATA_KEY: String = "test.build.data"
+  lazy val oldTestBuildDataProp = System.getProperty(TEST_BUILD_DATA_KEY)
+  lazy val cluster = new MiniDFSCluster(new Configuration, 2, true, null)
+  lazy val nnPort = cluster.getNameNode.getNameNodeAddress.getPort
+  lazy val hdfsUrl =  "hdfs://localhost:" + nnPort
+
+  override def beforeAll() {
+    System.setProperty(TEST_BUILD_DATA_KEY, dfsDir.toString)
+    cluster.waitActive()
+  }
 
   before {
     tempDirectory = Files.createTempDir()
@@ -45,6 +58,11 @@ class WriteAheadLogSuite extends FunSuite with BeforeAndAfter {
       FileUtils.deleteDirectory(tempDirectory)
       tempDirectory = null
     }
+
+  }
+
+  override def afterAll() {
+    cluster.shutdown(true)
   }
 
   test("WriteAheadLogWriter - writing data") {
@@ -57,13 +75,16 @@ class WriteAheadLogSuite extends FunSuite with BeforeAndAfter {
     assert(writtenData.toArray === dataToWrite.toArray)
   }
 
-  test("WriteAheadLogWriter - syncing of data by writing and reading immediately") {
-    val file = new File(tempDirectory, Random.nextString(10))
+  test("WriteAheadLogWriter - syncing of data by writing and reading immediately using " +
+    "Minicluster") {
+    val file = new String(Random.alphanumeric.take(10).toArray)
     val dataToWrite = generateRandomData()
-    val writer = new WriteAheadLogWriter("file:///" + file, hadoopConf)
+    val writer = new WriteAheadLogWriter(hdfsUrl + "/ss/" + file, hadoopConf)
     dataToWrite.foreach { data =>
-      val segment = writer.write(data)
-      assert(readDataManually(file, Seq(segment)).head === data)
+      val segment = writer.write(ByteBuffer.wrap(data.getBytes()))
+      val reader = new WriteAheadLogRandomReader(hdfsUrl + "/ss/" + file, hadoopConf)
+      val dataRead = reader.read(segment)
+      assert(data === new String(dataRead.array()))
     }
     writer.close()
   }
@@ -83,13 +104,13 @@ class WriteAheadLogSuite extends FunSuite with BeforeAndAfter {
     reader.close()
   }
 
-  test("WriteAheadLogReader - sequentially reading data written with writer") {
+  test("WriteAheadLogReader - sequentially reading data written with writer using Minicluster") {
     // Write data manually for testing the sequential reader
-    val file = new File(tempDirectory, "TestWriter")
+    val fileName = new String(Random.alphanumeric.take(10).toArray)
     val dataToWrite = generateRandomData()
-    writeDataUsingWriter(file, dataToWrite)
+    writeDataUsingWriter(hdfsUrl + "/ss/" + fileName, dataToWrite)
     val iter = dataToWrite.iterator
-    val reader = new WriteAheadLogReader("file:///" + file.toString, hadoopConf)
+    val reader = new WriteAheadLogReader(hdfsUrl + "/ss/" + fileName, hadoopConf)
     reader.foreach { byteBuffer =>
       assert(byteBufferToString(byteBuffer) === iter.next())
     }
@@ -111,15 +132,16 @@ class WriteAheadLogSuite extends FunSuite with BeforeAndAfter {
     reader.close()
   }
 
-  test("WriteAheadLogRandomReader - reading data using random reader written with writer") {
+  test("WriteAheadLogRandomReader - reading data using random reader written with writer using " +
+    "Minicluster") {
     // Write data using writer for testing the random reader
-    val file = new File(tempDirectory, "TestRandomReads")
+    val fileName = new String(Random.alphanumeric.take(10).toArray)
     val data = generateRandomData()
-    val segments = writeDataUsingWriter(file, data)
+    val segments = writeDataUsingWriter(hdfsUrl + "/ss/" + fileName, data)
 
     // Read a random sequence of segments and verify read data
     val dataAndSegments = data.zip(segments).toSeq.permutations.take(10).flatten
-    val reader = new WriteAheadLogRandomReader("file:///" + file.toString, hadoopConf)
+    val reader = new WriteAheadLogRandomReader(hdfsUrl + "/ss/" + fileName, hadoopConf)
     dataAndSegments.foreach { case(data, segment) =>
       assert(data === byteBufferToString(reader.read(segment)))
     }
@@ -192,8 +214,8 @@ object WriteAheadLogSuite {
     segments
   }
 
-  def writeDataUsingWriter(file: File, data: Seq[String]): Seq[FileSegment] = {
-    val writer = new WriteAheadLogWriter(file.toString, hadoopConf)
+  def writeDataUsingWriter(filePath: String, data: Seq[String]): Seq[FileSegment] = {
+    val writer = new WriteAheadLogWriter(filePath, hadoopConf)
     val segments = data.map {
       item => writer.write(item)
     }
