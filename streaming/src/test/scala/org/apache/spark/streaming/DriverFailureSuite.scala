@@ -78,7 +78,7 @@ class DriverFailureSuite extends TestSuiteBase with Logging {
       (1L to DriverFailureTestReceiver.maxRecordsPerBlock).map(x => (1L to x).sum).toSet
 
     val verify = (time: Time, output: Seq[(String, Long)]) => {
-      println(s"$time: ${output.mkString(", ")}")
+      println(s"Count at $time: ${output.mkString(", ")}")
       if (!output.map { _._2 }.forall(expectedOutput.contains)) {
         throw new Exception(s"Incorrect output: $output\nExpected output: $expectedOutput")
       }
