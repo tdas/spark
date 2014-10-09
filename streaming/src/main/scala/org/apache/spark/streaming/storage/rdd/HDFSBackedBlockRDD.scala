@@ -68,6 +68,7 @@ class HDFSBackedBlockRDD[T: ClassTag](
         block.data.asInstanceOf[Iterator[T]]
       // Data not found in Block Manager, grab it from HDFS
       case None =>
+        logInfo("Reading partition data from write ahead log " + partition.segment.path)
         val reader = new WriteAheadLogRandomReader(partition.segment.path, hadoopConf)
         val dataRead = reader.read(partition.segment)
         reader.close()

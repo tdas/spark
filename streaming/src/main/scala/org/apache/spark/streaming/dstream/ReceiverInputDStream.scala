@@ -21,10 +21,11 @@ import scala.collection.mutable.HashMap
 import scala.reflect.ClassTag
 
 import org.apache.spark.rdd.{BlockRDD, RDD}
-import org.apache.spark.storage.BlockId
+import org.apache.spark.storage.{StorageLevel, BlockId}
 import org.apache.spark.streaming._
 import org.apache.spark.streaming.receiver.Receiver
 import org.apache.spark.streaming.scheduler.ReceivedBlockInfo
+import org.apache.spark.streaming.storage.rdd.HDFSBackedBlockRDD
 
 /**
  * Abstract class for defining any [[org.apache.spark.streaming.dstream.InputDStream]]
@@ -63,14 +64,21 @@ abstract class ReceiverInputDStream[T: ClassTag](@transient ssc_ : StreamingCont
     // If this is called for any time before the start time of the context,
     // then this returns an empty RDD. This may happen when recovering from a
     // master failure
-    if (validTime >= graph.startTime) {
+    val blockRDD = if (validTime >= graph.startTime) {
       val blockInfo = ssc.scheduler.receiverTracker.getReceivedBlockInfo(id)
       receivedBlockInfo(validTime) = blockInfo
       val blockIds = blockInfo.map(_.blockId.asInstanceOf[BlockId])
-      Some(new BlockRDD[T](ssc.sc, blockIds))
+      val fileSegments = blockInfo.flatMap(_.fileSegmentOption)
+      if (fileSegments.nonEmpty) {
+        new HDFSBackedBlockRDD[T](ssc.sparkContext, ssc.sparkContext.hadoopConfiguration,
+          blockIds, fileSegments, storeInBlockManager = false, StorageLevel.MEMORY_ONLY_SER)
+      } else {
+        new BlockRDD[T](ssc.sc, blockIds)
+      }
     } else {
-      Some(new BlockRDD[T](ssc.sc, Array[BlockId]()))
+      new BlockRDD[T](ssc.sc, Array[BlockId]())
     }
+    Some(blockRDD)
   }
 
   /** Get information on received blocks. */

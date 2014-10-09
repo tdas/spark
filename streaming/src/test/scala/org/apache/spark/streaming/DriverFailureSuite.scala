@@ -115,6 +115,7 @@ abstract class DriverFailureTest(
    * @return None is test succeeded, or Some(errorMessage) if test failed
    */
   def testAndGetError(): Option[String] = {
+    DriverFailureTest.reset()
     ssc = setupContext(checkpointDir.toString)
     run()
   }
@@ -125,7 +126,7 @@ abstract class DriverFailureTest(
 
     def allBatchesCompleted = batchesCompleted >= numBatchesToRun
     def timedOut = (System.currentTimeMillis - runStartTime) > timeoutMillis
-    def failed = DriverFailureSuite.failed
+    def failed = DriverFailureTest.failed
 
     while(!failed && !allBatchesCompleted && !timedOut) {
       // Start the thread to kill the streaming after some time
@@ -147,7 +148,7 @@ abstract class DriverFailureTest(
       } catch {
         case e: Exception =>
           logError("Error running streaming context", e)
-          DriverFailureSuite.fail("Error running streaming context: " + e)
+          DriverFailureTest.fail("Error running streaming context: " + e)
       }
 
       logInfo(s"Failed = $failed")
@@ -173,11 +174,12 @@ abstract class DriverFailureTest(
           throw new Exception("Trying to create new context when it " +
             "should be reading from checkpoint file")
         })
+        println("Restarting")
       }
     }
 
     if (failed) {
-      Some(s"Failed with message: ${DriverFailureSuite.failureMessage}")
+      Some(s"Failed with message: ${DriverFailureTest.failureMessage}")
     } else if (timedOut) {
       Some(s"Timed out after $batchesCompleted/$numBatchesToRun batches, and " +
         s"${System.currentTimeMillis} ms (time out = $timeoutMillis ms")
@@ -224,6 +226,7 @@ abstract class DriverFailureTest(
           ssc.stop()
           killed = true
           killCount += 1
+          println("Killed")
         }
         logInfo("Killing thread finished normally")
       } catch {
@@ -235,12 +238,18 @@ abstract class DriverFailureTest(
   }
 }
 
-object DriverFailureSuite {
-  @transient @volatile var failed = false
-  @transient @volatile var failureMessage = "NOT SET"
+object DriverFailureTest {
+  @transient @volatile var failed: Boolean = _
+  @transient @volatile var failureMessage: String = _
 
   def fail(message: String) {
+    failed = true
     failureMessage = message
+  }
+
+  def reset() {
+    failed = false
+    failureMessage = "NOT SET"
   }
 }
 
@@ -268,12 +277,14 @@ class ReceiverBasedDriverFailureTest[T](
 
       val verify = outputVerifyingFunction
       operatedStream.foreachRDD((rdd: RDD[T], time: Time) => {
-        val collected = rdd.collect()
         try {
+          val collected = rdd.collect()
           verify(time, collected)
         } catch {
+          case ie: InterruptedException =>
+            // ignore
           case e: Exception =>
-            DriverFailureSuite.fail(e.toString)
+            DriverFailureTest.fail(e.toString)
         }
       })
       newSsc.checkpoint(checkpointDirector)
@@ -338,10 +349,10 @@ object DriverFailureTestReceiver {
   }
 
   def commitBlock() {
+    println(s"Stored ${counter.get()} copies of word${currentKey.get}")
     if (counter.incrementAndGet() > maxRecordsPerBlock) {
       currentKey.incrementAndGet()
       counter.set(1)
-      println("Stored " + counter.get())
     }
   }
 }
