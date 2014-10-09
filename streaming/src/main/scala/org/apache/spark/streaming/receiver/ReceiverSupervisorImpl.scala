@@ -25,17 +25,13 @@ import scala.concurrent.Await
 
 import akka.actor.{Actor, Props}
 import akka.pattern.ask
-
 import com.google.common.base.Throwables
-
-import org.apache.spark.{Logging, SparkEnv}
-import org.apache.spark.streaming.scheduler._
-import org.apache.spark.util.{Utils, AkkaUtils}
+import org.apache.hadoop.conf.Configuration
+import org.apache.spark.{SparkException, Logging, SparkEnv}
 import org.apache.spark.storage.StreamBlockId
-import org.apache.spark.streaming.scheduler.DeregisterReceiver
-import org.apache.spark.streaming.scheduler.AddBlock
-import org.apache.spark.streaming.scheduler.RegisterReceiver
+import org.apache.spark.streaming.scheduler._
 import org.apache.spark.streaming.storage._
+import org.apache.spark.util.{AkkaUtils, Utils}
 
 /**
  * Concrete implementation of [[org.apache.spark.streaming.receiver.ReceiverSupervisor]]
@@ -45,11 +41,26 @@ import org.apache.spark.streaming.storage._
  */
 private[streaming] class ReceiverSupervisorImpl(
     receiver: Receiver[_],
-    env: SparkEnv
+    env: SparkEnv,
+    hadoopConf: Configuration,
+    checkpointDirOption: Option[String]
   ) extends ReceiverSupervisor(receiver, env.conf) with Logging {
 
-  private val receivedBlockHandler =
-    new BlockManagerBasedBlockHandler(env.blockManager, receiver.streamId, receiver.storageLevel)
+  private val receivedBlockHandler: ReceivedBlockHandler = {
+    if (env.conf.getBoolean("spark.streaming.receiver.writeAheadLog.enable", false)) {
+      if (checkpointDirOption.isEmpty) {
+        throw new SparkException(
+          "Cannot enable receiver write-ahead log without checkpoint directory set. " +
+            "Please use streamingContext.checkpoint() to set the checkpoint directory. " +
+            "See documentation for more details.")
+      }
+      new WriteAheadLogBasedBlockHandler(env.blockManager, receiver.streamId,
+        receiver.storageLevel, env.conf, hadoopConf, checkpointDirOption.get)
+    } else {
+      new BlockManagerBasedBlockHandler(env.blockManager, receiver.streamId, receiver.storageLevel)
+    }
+  }
+
 
   /** Remote Akka actor for the ReceiverTracker */
   private val trackerActor = {
@@ -143,7 +154,7 @@ private[streaming] class ReceiverSupervisorImpl(
 
     val time = System.currentTimeMillis
     val fileSegmentOption = receivedBlockHandler.storeBlock(blockId, receivedBlock) match {
-      case f: FileSegment => Some(f)
+      case Some(f: FileSegment) => Some(f)
       case _ => None
     }
     logDebug("Pushed block " + blockId + " in " + (System.currentTimeMillis - time) + " ms")

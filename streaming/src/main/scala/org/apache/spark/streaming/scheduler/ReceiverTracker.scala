@@ -17,20 +17,22 @@
 
 package org.apache.spark.streaming.scheduler
 
+import java.nio.ByteBuffer
+
 import scala.collection.mutable.{HashMap, SynchronizedMap, SynchronizedQueue}
 import scala.language.existentials
 
 import akka.actor._
 import org.apache.hadoop.conf.Configuration
-import org.apache.spark.{SparkConf, Logging, SparkEnv, SparkException}
+import org.apache.hadoop.fs.Path
+import org.apache.spark.{Logging, SparkConf, SparkEnv, SparkException}
 import org.apache.spark.SparkContext._
+import org.apache.spark.SerializableWritable
 import org.apache.spark.storage.StreamBlockId
 import org.apache.spark.streaming.{StreamingContext, Time}
 import org.apache.spark.streaming.receiver.{Receiver, ReceiverSupervisorImpl, StopReceiver}
-import org.apache.spark.streaming.storage.{WriteAheadLogManager, FileSegment}
+import org.apache.spark.streaming.storage.{FileSegment, WriteAheadLogManager}
 import org.apache.spark.util.Utils
-import org.apache.hadoop.fs.Path
-import java.nio.ByteBuffer
 
 /** Information about blocks received by the receiver */
 private[streaming] case class ReceivedBlockInfo(
@@ -323,6 +325,9 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
           ssc.sc.makeRDD(receivers, receivers.size)
         }
 
+      val checkpointDirOption = Option(ssc.checkpointDir)
+      val serializableHadoopConf = new SerializableWritable(ssc.sparkContext.hadoopConfiguration)
+
       // Function to start the receiver on the worker node
       val startReceiver = (iterator: Iterator[Receiver[_]]) => {
         if (!iterator.hasNext) {
@@ -330,11 +335,10 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
             "Could not start receiver as object not found.")
         }
         val receiver = iterator.next()
-        val supervisor = new ReceiverSupervisorImpl(receiver, SparkEnv.get)
+        val supervisor = new ReceiverSupervisorImpl(
+          receiver, SparkEnv.get, serializableHadoopConf.value, checkpointDirOption)
         supervisor.start()
-        logInfo("Supervisor started()")
         supervisor.awaitTermination()
-        logInfo("Supervisor terminated")
       }
       // Run the dummy Spark job to ensure that all slaves have registered.
       // This avoids all the receivers to be scheduled on the same node.
@@ -344,7 +348,7 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
 
       // Distribute the receivers and start them
       logInfo("Starting " + receivers.length + " receivers")
-      ssc.sparkContext.runJob(tempRDD, startReceiver)
+      ssc.sparkContext.runJob(tempRDD, ssc.sparkContext.clean(startReceiver))
       logInfo("All of the receivers have been terminated")
     }
 
