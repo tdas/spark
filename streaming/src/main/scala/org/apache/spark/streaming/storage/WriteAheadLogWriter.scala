@@ -16,20 +16,38 @@
  */
 package org.apache.spark.streaming.storage
 
-import java.io.Closeable
-import java.lang.reflect.Method
+import java.io._
+import java.net.URI
 import java.nio.ByteBuffer
 
 import scala.util.Try
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.FSDataOutputStream
+import org.apache.hadoop.fs.{FSDataOutputStream, FileSystem}
+import org.apache.spark.streaming.storage.FileSegment
 
 private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) extends Closeable {
-  private val stream = HdfsUtils.getOutputStream(path, conf)
-  private var nextOffset = stream.getPos
+  private val underlyingStream: Either[DataOutputStream, FSDataOutputStream] = {
+    val uri = new URI(path)
+    val defaultFs = FileSystem.getDefaultUri(conf).getScheme
+    val isDefaultLocal = defaultFs == null || defaultFs == "file"
+
+    if ((isDefaultLocal && uri.getScheme == null) || uri.getScheme == "file") {
+      assert(!new File(uri.getPath).exists)
+      Left(new DataOutputStream(new BufferedOutputStream(new FileOutputStream(uri.getPath))))
+    } else {
+      Right(HdfsUtils.getOutputStream(path, conf))
+    }
+  }
+
+  private lazy val hadoopFlushMethod = {
+    val cls = classOf[FSDataOutputStream]
+    Try(cls.getMethod("hflush")).orElse(Try(cls.getMethod("sync"))).toOption
+  }
+
+  private var nextOffset = getPosition()
   private var closed = false
-  private val hflushMethod = getHflushOrSync()
+
 
   // Data is always written as:
   // - Length - Long
@@ -48,8 +66,8 @@ private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) 
         stream.write(data.get())
       }
     }
-    hflushOrSync()
-    nextOffset = stream.getPos
+    flush()
+    nextOffset = getPosition()
     segment
   }
 
@@ -58,17 +76,22 @@ private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) 
     stream.close()
   }
 
-  private def hflushOrSync() {
-    hflushMethod.foreach(_.invoke(stream))
+  private def stream(): DataOutputStream = {
+    underlyingStream.fold(x => x,  x => x)
   }
 
-  private def getHflushOrSync(): Option[Method] = {
-    Try {
-      Some(classOf[FSDataOutputStream].getMethod("hflush"))
-    }.recover {
-      case e: NoSuchMethodException =>
-        Some(classOf[FSDataOutputStream].getMethod("sync"))
-    }.getOrElse(None)
+  private def getPosition(): Long = {
+    underlyingStream match {
+      case Left(localStream) => localStream.size
+      case Right(dfsStream) => dfsStream.getPos()
+    }
+  }
+
+  private def flush() {
+    underlyingStream match {
+      case Left(localStream) => localStream.flush
+      case Right(dfsStream) => hadoopFlushMethod.foreach { _.invoke(dfsStream) }
+    }
   }
 
   private def assertOpen() {

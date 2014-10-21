@@ -20,16 +20,20 @@ import java.io.{EOFException, Closeable}
 import java.nio.ByteBuffer
 
 import org.apache.hadoop.conf.Configuration
+import org.apache.spark.Logging
 
 private[streaming] class WriteAheadLogReader(path: String, conf: Configuration)
-  extends Iterator[ByteBuffer] with Closeable {
+  extends Iterator[ByteBuffer] with Closeable with Logging {
 
   private val instream = HdfsUtils.getInputStream(path, conf)
   private var closed = false
   private var nextItem: Option[ByteBuffer] = None
 
   override def hasNext: Boolean = synchronized {
-    assertOpen()
+    if (closed) {
+      return false
+    }
+
     if (nextItem.isDefined) { // handle the case where hasNext is called without calling next
       true
     } else {
@@ -38,33 +42,35 @@ private[streaming] class WriteAheadLogReader(path: String, conf: Configuration)
         val buffer = new Array[Byte](length)
         instream.readFully(buffer)
         nextItem = Some(ByteBuffer.wrap(buffer))
+        logTrace("Read next item " + nextItem.get)
         true
       } catch {
-        case e: EOFException => false
-        case e: Exception => throw e
+        case e: EOFException =>
+          logDebug("Error reading next item, EOF reached", e)
+          close()
+          false
+        case e: Exception =>
+          logDebug("Error reading next item, EOF reached", e)
+          close()
+          throw e
       }
     }
   }
 
   override def next(): ByteBuffer = synchronized {
-    // TODO: Possible error case where there are not enough bytes in the stream
-    // TODO: How to handle that?
     val data = nextItem.getOrElse {
-      throw new IllegalStateException("next called without calling hasNext or after hasNext " +
-        "returned false")
+      close()
+      throw new IllegalStateException(
+        "next called without calling hasNext or after hasNext returned false")
     }
     nextItem = None // Ensure the next hasNext call loads new data.
     data
   }
 
   override def close(): Unit = synchronized {
+    if (!closed) {
+      instream.close()
+    }
     closed = true
-    instream.close()
   }
-
-  private def assertOpen() {
-    HdfsUtils.checkState(!closed, "Stream is closed. Create a new Reader to read from the " +
-      "file.")
-  }
-
 }

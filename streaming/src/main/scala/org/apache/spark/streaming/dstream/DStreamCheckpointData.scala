@@ -26,7 +26,7 @@ import org.apache.spark.Logging
 import org.apache.spark.streaming.Time
 
 private[streaming]
-class DStreamCheckpointData[T: ClassTag] (dstream: DStream[T])
+class DStreamCheckpointData[T: ClassTag](dstream: DStream[T])
   extends Serializable with Logging {
   protected val data = new HashMap[Time, AnyRef]()
 
