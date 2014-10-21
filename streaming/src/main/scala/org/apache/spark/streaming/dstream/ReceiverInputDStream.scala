@@ -40,10 +40,6 @@ import org.apache.spark.streaming.storage.rdd.HDFSBackedBlockRDD
 abstract class ReceiverInputDStream[T: ClassTag](@transient ssc_ : StreamingContext)
   extends InputDStream[T](ssc_) {
 
-  /** Keeps all received blocks information */
-  private[streaming] lazy val receivedBlockInfo = new HashMap[Time, Array[ReceivedBlockInfo]]
-  private[streaming] override val checkpointData = new ReceiverInputDStreamCheckpointData(this)
-
   /** This is an unique identifier for the network input stream. */
   val id = ssc.getNewReceiverStreamId()
 
@@ -65,10 +61,11 @@ abstract class ReceiverInputDStream[T: ClassTag](@transient ssc_ : StreamingCont
     // then this returns an empty RDD. This may happen when recovering from a
     // master failure
     val blockRDD = if (validTime >= graph.startTime) {
-      val blockInfo = ssc.scheduler.receiverTracker.getReceivedBlockInfo(id)
-      receivedBlockInfo(validTime) = blockInfo
-      val blockIds = blockInfo.map(_.blockId.asInstanceOf[BlockId])
-      val fileSegments = blockInfo.flatMap(_.fileSegmentOption)
+      val blockInfo = getReceivedBlockInfo(validTime)
+      val blockIds = blockInfo.map(_.blockId).map { _.asInstanceOf[BlockId] } toArray
+      val fileSegments = blockInfo.flatMap(_.fileSegmentOption).toArray
+      logInfo("Stream " + id + ": allocated " + blockInfo.map(_.blockId).mkString(", "))
+
       if (fileSegments.nonEmpty) {
         new HDFSBackedBlockRDD[T](ssc.sparkContext, ssc.sparkContext.hadoopConfiguration,
           blockIds, fileSegments, storeInBlockManager = false, StorageLevel.MEMORY_ONLY_SER)
@@ -82,8 +79,8 @@ abstract class ReceiverInputDStream[T: ClassTag](@transient ssc_ : StreamingCont
   }
 
   /** Get information on received blocks. */
-  private[streaming] def getReceivedBlockInfo(time: Time) = {
-    receivedBlockInfo.get(time).getOrElse(Array.empty[ReceivedBlockInfo])
+  private[streaming] def getReceivedBlockInfo(time: Time): Seq[ReceivedBlockInfo] = {
+    ssc.scheduler.receiverTracker.getReceivedBlocks(time, id)
   }
 
   /**
@@ -94,32 +91,6 @@ abstract class ReceiverInputDStream[T: ClassTag](@transient ssc_ : StreamingCont
    */
   private[streaming] override def clearMetadata(time: Time) {
     super.clearMetadata(time)
-    val oldReceivedBlocks = receivedBlockInfo.filter(_._1 <= (time - rememberDuration))
-    receivedBlockInfo --= oldReceivedBlocks.keys
-    logDebug("Cleared " + oldReceivedBlocks.size + " RDDs that were older than " +
-      (time - rememberDuration) + ": " + oldReceivedBlocks.keys.mkString(", "))
+    ssc.scheduler.receiverTracker.cleanupOldInfo(time - rememberDuration)
   }
 }
-
-private[streaming] class ReceiverInputDStreamCheckpointData[T: ClassTag](
-    dstream: ReceiverInputDStream[T]) extends DStreamCheckpointData[T](dstream) {
-
-  private var timeToReceivedBlockInfo: Seq[(Time, Array[ReceivedBlockInfo])] = _
-
-  override def update(time: Time) {
-    timeToReceivedBlockInfo = dstream.receivedBlockInfo.toSeq
-  }
-
-  override def cleanup(time: Time) {
-    // not required, as block info copied in whole every time update is called
-  }
-
-  override def restore() {
-    Option(timeToReceivedBlockInfo).foreach { blockInfo =>
-      dstream.receivedBlockInfo.clear()
-      dstream.receivedBlockInfo ++= blockInfo
-    }
-  }
-}
-
-

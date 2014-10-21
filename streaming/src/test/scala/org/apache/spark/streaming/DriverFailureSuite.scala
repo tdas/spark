@@ -25,7 +25,7 @@ import scala.util.Random
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
-import org.apache.spark.{Logging, SparkConf}
+import org.apache.spark.{HashPartitioner, Logging, SparkConf}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.StreamingContext._
@@ -33,6 +33,7 @@ import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.streaming.receiver.Receiver
 import org.apache.spark.streaming.scheduler.{StreamingListener, StreamingListenerBatchCompleted}
 import org.apache.spark.util.Utils
+import scala.collection.mutable.ArrayBuffer
 
 /**
  * This testsuite tests master failures at random times while the stream is running using
@@ -66,27 +67,62 @@ class DriverFailureSuite extends TestSuiteBase with Logging {
   }
 */
   test("multiple failures with receiver and updateStateByKey") {
+
+
     val operation = (st: DStream[String]) => {
-      val updateFunc = (values: Seq[Long], state: Option[Long]) => {
-        Some(values.foldLeft(0L)(_ + _) + state.getOrElse(0L))
+
+      val mapPartitionFunc = (iterator: Iterator[String]) => {
+        Iterator(iterator.flatMap(_.split(" ")).map(_ -> 1L).reduce((x, y) => (x._1, x._2 + y._2)))
       }
-      st.flatMap(_.split(" ")).map(x => (x, 1L)).updateStateByKey[Long](updateFunc)
+
+      val updateFunc = (iterator: Iterator[(String, Seq[Long], Option[Seq[Long]])]) => {
+        iterator.map { case (key, values, state) =>
+          val combined = (state.getOrElse(Seq.empty) ++ values).sorted
+          if (state.isEmpty || state.get.max != DriverFailureTestReceiver.maxRecordsPerBlock) {
+            val oldState = s"[${ state.map { _.max }.getOrElse(-1) }, ${state.map { _.distinct.sum }.getOrElse(0)}]"
+            val newState = s"[${combined.max}, ${combined.distinct.sum}]"
+            println(s"Updated state for $key: state = $oldState, new values = $values, new state = $newState")
+          }
+          (key, combined)
+        }
+      }
+
+      st.mapPartitions(mapPartitionFunc)
+        .updateStateByKey[Seq[Long]](updateFunc, new HashPartitioner(2), rememberPartitioner = false)
         .checkpoint(batchDuration * 5)
     }
 
-    val expectedOutput =
-      (1L to DriverFailureTestReceiver.maxRecordsPerBlock).map(x => (1L to x).sum).toSet
+    val maxValue = DriverFailureTestReceiver.maxRecordsPerBlock
+    val expectedValues = (1L to maxValue).toSet
 
-    val verify = (time: Time, output: Seq[(String, Long)]) => {
-      println(s"Count at $time: ${output.mkString(", ")}")
-      if (!output.map { _._2 }.forall(expectedOutput.contains)) {
-        throw new Exception(s"Incorrect output: $output\nExpected output: $expectedOutput")
+    val verify = (time: Time, output: Seq[(String, Seq[Long])]) => {
+      val outputStr = output.map { x => (x._1, x._2.distinct.sum) }.sortBy(_._1).mkString(", ")
+      println(s"State at $time: $outputStr")
+
+      val incompletelyReceivedWords = output.filter { _._2.max < maxValue }
+      if (incompletelyReceivedWords.size > 1) {
+        val debugStr = incompletelyReceivedWords.map { x =>
+          s"""${x._1}: ${x._2.mkString(",")}, sum = ${x._2.distinct.sum}"""
+        }.mkString("\n")
+        throw new Exception(s"Incorrect processing of input, all input not processed:\n$debugStr\n")
+      }
+
+      output.foreach { case (key, values) =>
+        if (!values.forall(expectedValues.contains)) {
+          val sum = values.distinct.sum
+          val debugStr = values.zip(1L to values.size).map {
+            x => if (x._1 == x._2) x._1 else s"[${x._2}]"
+          }.mkString(",") + s", sum = $sum"
+          throw new Exception(s"Incorrect sequence of values in output:\n$debugStr\n")
+        }
       }
     }
 
-    val driverTest = new ReceiverBasedDriverFailureTest[(String, Long)](
-      "./driver-test/", batchDuration.milliseconds.toInt, 120, operation, verify)
-    driverTest.testAndGetError().map(errorMessage => fail(errorMessage))
+    val driverTest = new ReceiverBasedDriverFailureTest[(String, Seq[Long])](
+      "./driver-test/", 200, 50, operation, verify)
+    driverTest.testAndGetError().map { errorMessage =>
+      fail(errorMessage)
+    }
   }
 }
 
@@ -98,7 +134,7 @@ abstract class DriverFailureTest(
   ) extends Logging {
 
   @transient private val checkpointDir = createCheckpointDir()
-  @transient private val timeoutMillis = batchDurationMillis * numBatchesToRun * 2
+  @transient private val timeoutMillis = batchDurationMillis * numBatchesToRun * 4
 
   @transient @volatile private var killed = false
   @transient @volatile private var killCount = 0
@@ -123,6 +159,7 @@ abstract class DriverFailureTest(
   private def run(): Option[String] = {
 
     val runStartTime = System.currentTimeMillis
+    var killingThread: Thread = null
 
     def allBatchesCompleted = batchesCompleted >= numBatchesToRun
     def timedOut = (System.currentTimeMillis - runStartTime) > timeoutMillis
@@ -131,19 +168,15 @@ abstract class DriverFailureTest(
     while(!failed && !allBatchesCompleted && !timedOut) {
       // Start the thread to kill the streaming after some time
       killed = false
-      val killingThread = new KillingThread(ssc, batchDurationMillis * 10)
-      killingThread.start()
       try {
-        // Start the streaming computation and let it run while ...
-        // (i) StreamingContext has not been shut down yet
-        // (ii) The last expected output has not been generated yet
-        // (iii) Its not timed out yet
-        System.clearProperty("spark.streaming.clock")
-        System.clearProperty("spark.driver.port")
         ssc.addStreamingListener(new BatchCompletionListener)
         ssc.start()
+
+        killingThread = new KillingThread(ssc, batchDurationMillis * 10)
+        killingThread.start()
+
         while (!failed && !killed && !allBatchesCompleted && !timedOut) {
-          ssc.awaitTermination(100)
+          ssc.awaitTermination(1)
         }
       } catch {
         case e: Exception =>
@@ -169,20 +202,22 @@ abstract class DriverFailureTest(
             "\n-------------------------------------------\n"
         )
         Thread.sleep(sleepTime)
+
         // Recreate the streaming context from checkpoint
+        System.clearProperty("spark.driver.port")
         ssc = StreamingContext.getOrCreate(checkpointDir.toString, () => {
           throw new Exception("Trying to create new context when it " +
             "should be reading from checkpoint file")
         })
-        println("Restarting")
+        println("Restarted")
       }
     }
 
     if (failed) {
-      Some(s"Failed with message: ${DriverFailureTest.failureMessage}")
+      Some(s"Failed with message: ${DriverFailureTest.firstFailureMessage}")
     } else if (timedOut) {
       Some(s"Timed out after $batchesCompleted/$numBatchesToRun batches, and " +
-        s"${System.currentTimeMillis} ms (time out = $timeoutMillis ms")
+        s"${System.currentTimeMillis} ms (time out = $timeoutMillis ms)")
     } else if (allBatchesCompleted) {
       None
     } else {
@@ -222,12 +257,10 @@ abstract class DriverFailureTest(
             "Killing streaming context after " + killWaitTime + " ms" +
             "\n---------------------------------------\n"
         )
-        if (ssc != null) {
-          ssc.stop()
-          killed = true
-          killCount += 1
-          println("Killed")
-        }
+        ssc.stop()
+        killed = true
+        killCount += 1
+        println("Killed")
         logInfo("Killing thread finished normally")
       } catch {
         case ie: InterruptedException => logInfo("Killing thread interrupted")
@@ -240,16 +273,18 @@ abstract class DriverFailureTest(
 
 object DriverFailureTest {
   @transient @volatile var failed: Boolean = _
-  @transient @volatile var failureMessage: String = _
+  @transient @volatile var firstFailureMessage: String = _
 
   def fail(message: String) {
-    failed = true
-    failureMessage = message
+    if (!failed) {
+      failed = true
+      firstFailureMessage = message
+    }
   }
 
   def reset() {
     failed = false
-    failureMessage = "NOT SET"
+    firstFailureMessage = "NOT SET"
   }
 }
 
@@ -266,13 +301,29 @@ class ReceiverBasedDriverFailureTest[T](
   @transient val conf = new SparkConf()
   conf.setMaster("local[4]")
       .setAppName("ReceiverBasedDriverFailureTest")
-      .set("spark.streaming.receiver.writeAheadLog.enable", "true")
+      .set("spark.streaming.receiver.writeAheadLog.enable", "true")  // enable write ahead log
+      .set("spark.streaming.receiver.writeAheadLog.rotationIntervalSecs", "10")  // rotate logs to test cleanup
 
   override def setupContext(checkpointDirector: String): StreamingContext = {
 
     val context = StreamingContext.getOrCreate(checkpointDirector, () => {
       val newSsc = new StreamingContext(conf, Milliseconds(batchDurationMillis))
       val inputStream = newSsc.receiverStream[String](new DriverFailureTestReceiver)
+      /*inputStream.mapPartitions(iter => {
+        val sum = iter.map { _.split(" ").size }.fold(0)(_ + _)
+        Iterator(sum)
+      }).foreachRDD ((rdd: RDD[Int], time: Time) => {
+        try {
+          val collected =  rdd.collect().sorted
+          println(s"# in partitions at $time = ${collected.mkString(", ")}")
+        } catch {
+          case ie: InterruptedException =>
+          // ignore
+          case e: Exception =>
+            DriverFailureTest.fail(e.toString)
+        }
+
+      })*/
       val operatedStream = operation(inputStream)
 
       val verify = outputVerifyingFunction
@@ -304,11 +355,11 @@ class DriverFailureTestReceiver extends Receiver[String](StorageLevel.MEMORY_ONL
   class ReceivingThread extends Thread() {
     override def run() {
       while (!isStopped() && !isInterrupted()) {
-        val block = getNextBlock()
-        store(block)
-        commitBlock()
         try {
-          Thread.sleep(100)
+          val block = getNextBlock()
+          store(block)
+          commitBlock()
+          Thread.sleep(10)
         } catch {
           case ie: InterruptedException =>
           case e: Exception =>
@@ -343,9 +394,9 @@ object DriverFailureTestReceiver {
   counter.set(1)
   currentKey.set(1)
 
-  def getNextBlock(): Iterator[String] = {
+  def getNextBlock(): ArrayBuffer[String] = {
     val count = counter.get()
-    (1 to count).map { _ => "word" + currentKey.get() }.iterator
+    new ArrayBuffer ++= (1 to count).map { _ => "word%03d".format(currentKey.get()) }
   }
 
   def commitBlock() {

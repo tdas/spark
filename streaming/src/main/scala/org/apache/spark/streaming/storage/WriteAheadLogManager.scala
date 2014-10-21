@@ -7,6 +7,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.permission.FsPermission
 import org.apache.spark.Logging
 import org.apache.spark.streaming.storage.WriteAheadLogManager._
 import org.apache.spark.streaming.util.{Clock, SystemClock}
@@ -17,22 +18,24 @@ private[streaming] class WriteAheadLogManager(
     hadoopConf: Configuration,
     rollingIntervalSecs: Int = 60,
     maxFailures: Int = 3,
-    callerName: String = null,
+    callerName: String = "",
     clock: Clock = new SystemClock
   ) extends Logging {
 
   private val pastLogs = new ArrayBuffer[LogInfo]
-  private val threadpoolName = "WriteAheadLogManager" +
-    Option(callerName).map { s => s" for $s" }.getOrElse("")
+  private val callerNameTag =
+    if (callerName != null && callerName.nonEmpty) s" for $callerName" else ""
+  private val threadpoolName = s"WriteAheadLogManager $callerNameTag"
   implicit private val executionContext = ExecutionContext.fromExecutorService(
     Utils.newDaemonFixedThreadPool(1, threadpoolName))
+  override protected val logName = s"WriteAheadLogManager $callerNameTag"
 
   private var currentLogPath: String = null
   private var currentLogWriter: WriteAheadLogWriter = null
   private var currentLogWriterStartTime: Long = -1L
   private var currentLogWriterStopTime: Long = -1L
 
-  recoverPastLogs()
+  initializeOrRecover()
 
   def writeToLog(byteBuffer: ByteBuffer): FileSegment = synchronized {
     var fileSegment: FileSegment = null
@@ -41,7 +44,7 @@ private[streaming] class WriteAheadLogManager(
     var succeeded = false
     while (!succeeded && failures < maxFailures) {
       try {
-        fileSegment = getLogWriter.write(byteBuffer)
+        fileSegment = getLogWriter(clock.currentTime).write(byteBuffer)
         succeeded = true
       } catch {
         case ex: Exception =>
@@ -74,7 +77,7 @@ private[streaming] class WriteAheadLogManager(
    * between the node calculating the threshTime (say, driver node), and the local system time
    * (say, worker node), the caller has to take account of possible time skew.
    */
-  def clearOldLogs(threshTime: Long): Unit = {
+  def cleanupOldLogs(threshTime: Long): Unit = {
     val oldLogFiles = synchronized { pastLogs.filter { _.endTime < threshTime } }
     logInfo(s"Attempting to clear ${oldLogFiles.size} old log files in $logDirectory " +
       s"older than $threshTime: ${oldLogFiles.map { _.path }.mkString("\n")}")
@@ -107,9 +110,8 @@ private[streaming] class WriteAheadLogManager(
     logInfo("Stopped log manager")
   }
 
-  private def getLogWriter: WriteAheadLogWriter = synchronized {
-    val currentTime = clock.currentTime()
-    if (currentLogPath == null || currentTime > currentLogWriterStopTime) {
+  private def getLogWriter(currentTime: Long): WriteAheadLogWriter = synchronized {
+    if (currentLogWriter == null || currentTime > currentLogWriterStopTime) {
       resetWriter()
       if (currentLogPath != null) {
         pastLogs += LogInfo(currentLogWriterStartTime, currentLogWriterStopTime, currentLogPath)
@@ -124,21 +126,25 @@ private[streaming] class WriteAheadLogManager(
     currentLogWriter
   }
 
-  private def recoverPastLogs(): Unit = synchronized {
+  private def initializeOrRecover(): Unit = synchronized {
     val logDirectoryPath = new Path(logDirectory)
-    val fs = logDirectoryPath.getFileSystem(hadoopConf)
-    if (fs.exists(logDirectoryPath) && fs.getFileStatus(logDirectoryPath).isDir) {
-      val logFileInfo = logFilesTologInfo(fs.listStatus(logDirectoryPath).map { _.getPath })
+    val fileSystem = logDirectoryPath.getFileSystem(hadoopConf)
+
+    if (fileSystem.exists(logDirectoryPath) && fileSystem.getFileStatus(logDirectoryPath).isDir) {
+      val logFileInfo = logFilesTologInfo(fileSystem.listStatus(logDirectoryPath).map { _.getPath })
       pastLogs.clear()
       pastLogs ++= logFileInfo
       logInfo(s"Recovered ${logFileInfo.size} log files from $logDirectory")
       logDebug(s"Recovered files are:\n${logFileInfo.map(_.path).mkString("\n")}")
+    } else {
+      fileSystem.mkdirs(logDirectoryPath,
+        FsPermission.createImmutable(Integer.parseInt("770", 8).toShort))
+      logInfo(s"Created ${logDirectory} for log files")
     }
   }
 
   private def resetWriter(): Unit = synchronized {
     if (currentLogWriter != null) {
-      currentLogWriter
       currentLogWriter.close()
       currentLogWriter = null
     }

@@ -60,45 +60,6 @@ private[streaming] case class ReportError(streamId: Int, message: String, error:
 private[streaming] case class DeregisterReceiver(streamId: Int, msg: String, error: String)
   extends ReceiverTrackerMessage
 
-
-/**
- *
- */
-private[streaming] class ReceivedBlockInfoCheckpointer(
-    checkpointDirectory: String, conf: SparkConf, hadoopConf: Configuration) {
-
-  import ReceivedBlockInfoCheckpointer._
-
-  private val logDirectory = checkpointDirToLogDir(checkpointDirectory)
-  private val logManager = new WriteAheadLogManager(
-    logDirectory, hadoopConf, callerName = "ReceiverTracker")
-
-  def recover(): Seq[ReceivedBlockInfo] = {
-    logManager.readFromLog().map { byteBuffer =>
-      Utils.deserialize[ReceivedBlockInfo](byteBuffer.array)
-    }.toSeq
-  }
-
-  def write(receivedBlockInfo: ReceivedBlockInfo) {
-    val bytes = Utils.serialize(receivedBlockInfo)
-    logManager.writeToLog(ByteBuffer.wrap(bytes))
-  }
-
-  def clear(threshTime: Long) {
-    logManager.clearOldLogs(threshTime)
-  }
-
-  def stop() {
-    logManager.stop()
-  }
-}
-
-private[streaming] object ReceivedBlockInfoCheckpointer {
-  def checkpointDirToLogDir(checkpointDir: String): String = {
-    new Path(checkpointDir, "receivedBlockMetadata").toString
-  }
-}
-
 /**
  * This class manages the execution of the receivers of NetworkInputDStreams. Instance of
  * this class must be created after all input streams have been added and StreamingContext.start()
@@ -113,26 +74,18 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
   private val receiverInputStreamMap = Map(receiverInputStreams.map(x => (x.id, x)): _*)
   private val receiverExecutor = new ReceiverLauncher()
   private val receiverInfo = new HashMap[Int, ReceiverInfo] with SynchronizedMap[Int, ReceiverInfo]
-  private val receivedBlockInfo = new HashMap[Int, SynchronizedQueue[ReceivedBlockInfo]]
-    with SynchronizedMap[Int, SynchronizedQueue[ReceivedBlockInfo]]
+  private val receivedBlockTracker = new ReceivedBlockTracker(
+    ssc.sparkContext.conf,
+    ssc.sparkContext.hadoopConfiguration,
+    receiverInputStreams.map { _.id },
+    ssc.scheduler.clock,
+    Option(ssc.checkpointDir)
+  )
   private val listenerBus = ssc.scheduler.listenerBus
-  val receivedBlockCheckpointerOption = Option(ssc.checkpointDir) map { dir =>
-    new ReceivedBlockInfoCheckpointer(dir, ssc.sparkContext.conf,
-      ssc.sparkContext.hadoopConfiguration)
-  }
 
   // actor is created when generator starts.
   // This not being null means the tracker has been started and not stopped
-  var actor: ActorRef = null
-  var currentTime: Time = null
-
-  receivedBlockCheckpointerOption.foreach { checkpointer =>
-    val recoveredBlockInfo = checkpointer.recover()
-    recoveredBlockInfo.foreach { info =>
-      getReceivedBlockInfoQueue(info.streamId) += info
-    }
-    logInfo(s"Recovered info on ${recoveredBlockInfo.size} blocks from write ahead log")
-  }
+  private var actor: ActorRef = null
 
   /** Start the actor and receiver execution thread. */
   def start() = synchronized {
@@ -157,29 +110,22 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
       // Finally, stop the actor
       ssc.env.actorSystem.stop(actor)
       actor = null
-
-      receivedBlockCheckpointerOption.foreach { _.stop() }
+      receivedBlockTracker.stop()
       logInfo("ReceiverTracker stopped")
     }
   }
 
   /** Return all the blocks received from a receiver. */
-  def getReceivedBlockInfo(streamId: Int): Array[ReceivedBlockInfo] = {
-    val receivedBlockInfo = getReceivedBlockInfoQueue(streamId).dequeueAll(x => true)
-    logInfo("Stream " + streamId + " received " + receivedBlockInfo.size + " blocks")
-    receivedBlockInfo.toArray
+  def getReceivedBlocks(batchTime: Time, streamId: Int): Seq[ReceivedBlockInfo] = {
+    receivedBlockTracker.getOrAllocateBlocksToBatch(batchTime, streamId)
   }
 
-  def getReceiverInfo(streamId: Int): Option[ReceiverInfo] = {
-    receiverInfo.get(streamId)
-  }
-
-  private def getReceivedBlockInfoQueue(streamId: Int) = {
-    receivedBlockInfo.getOrElseUpdate(streamId, new SynchronizedQueue[ReceivedBlockInfo])
+  def cleanupOldInfo(cleanupThreshTime: Time) {
+    receivedBlockTracker.cleanupOldBatches(cleanupThreshTime)
   }
 
   /** Register a receiver */
-  def registerReceiver(
+  private def registerReceiver(
       streamId: Int,
       typ: String,
       host: String,
@@ -196,7 +142,7 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
   }
 
   /** Deregister a receiver */
-  def deregisterReceiver(streamId: Int, message: String, error: String) {
+  private def deregisterReceiver(streamId: Int, message: String, error: String) {
     val newReceiverInfo = receiverInfo.get(streamId) match {
       case Some(oldInfo) =>
         oldInfo.copy(actor = null, active = false, lastErrorMessage = message, lastError = error)
@@ -215,21 +161,12 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
   }
 
   /** Add new blocks for the given stream */
-  def addBlock(receivedBlockInfo: ReceivedBlockInfo): Boolean = {
-    try {
-      receivedBlockCheckpointerOption.foreach { _.write(receivedBlockInfo) }
-      getReceivedBlockInfoQueue(receivedBlockInfo.streamId) += receivedBlockInfo
-      logDebug(s"Stream ${receivedBlockInfo.streamId} received block ${receivedBlockInfo.blockId}")
-      true
-    } catch {
-      case e: Exception =>
-        logError("Error adding block " + receivedBlockInfo, e)
-        false
-    }
+  private def addBlock(receivedBlockInfo: ReceivedBlockInfo): Boolean = {
+    receivedBlockTracker.addBlock(receivedBlockInfo)
   }
 
   /** Report error sent by a receiver */
-  def reportError(streamId: Int, message: String, error: String) {
+  private def reportError(streamId: Int, message: String, error: String) {
     val newReceiverInfo = receiverInfo.get(streamId) match {
       case Some(oldInfo) =>
         oldInfo.copy(lastErrorMessage = message, lastError = error)
@@ -249,7 +186,7 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
 
   /** Check if any blocks are left to be processed */
   def hasMoreReceivedBlockIds: Boolean = {
-    !receivedBlockInfo.values.forall(_.isEmpty)
+    receivedBlockTracker.hasUnallocatedReceivedBlocks()
   }
 
   /** Actor to receive messages from the receivers. */

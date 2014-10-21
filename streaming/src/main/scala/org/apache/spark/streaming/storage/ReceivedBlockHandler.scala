@@ -71,7 +71,7 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
   private val logManager = new WriteAheadLogManager(
     checkpointDirToLogDir(checkpointDir, streamId),
     hadoopConf, rollingInterval, maxFailures,
-    callerName = "WriteAheadLogBasedHandler",
+    callerName = "WriteAheadLogBasedBlockHandler",
     clock = clock
   )
 
@@ -93,7 +93,9 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
     val pushToBlockManagerFuture = Future {
       blockManager.putBytes(blockId, serializedBlock, storageLevel, tellMaster = true)
     }
-    val pushToLogFuture = Future { logManager.writeToLog(serializedBlock) }
+    val pushToLogFuture = Future {
+      logManager.writeToLog(serializedBlock)
+    }
     val combinedFuture = for {
       _ <- pushToBlockManagerFuture
       fileSegment <- pushToLogFuture
@@ -103,7 +105,7 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
   }
 
   def clearOldBlocks(threshTime: Long) {
-    logManager.clearOldLogs(threshTime)
+    logManager.cleanupOldLogs(threshTime)
   }
 
   def stop() {

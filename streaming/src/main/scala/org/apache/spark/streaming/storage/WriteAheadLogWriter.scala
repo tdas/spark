@@ -16,7 +16,7 @@
  */
 package org.apache.spark.streaming.storage
 
-import java.io.{BufferedOutputStream, Closeable, DataOutputStream, FileOutputStream}
+import java.io._
 import java.net.URI
 import java.nio.ByteBuffer
 
@@ -24,6 +24,7 @@ import scala.util.Try
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FSDataOutputStream, FileSystem}
+import org.apache.spark.streaming.storage.FileSegment
 
 private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) extends Closeable {
   private val underlyingStream: Either[DataOutputStream, FSDataOutputStream] = {
@@ -32,6 +33,7 @@ private[streaming] class WriteAheadLogWriter(path: String, conf: Configuration) 
     val isDefaultLocal = defaultFs == null || defaultFs == "file"
 
     if ((isDefaultLocal && uri.getScheme == null) || uri.getScheme == "file") {
+      assert(!new File(uri.getPath).exists)
       Left(new DataOutputStream(new BufferedOutputStream(new FileOutputStream(uri.getPath))))
     } else {
       Right(HdfsUtils.getOutputStream(path, conf))
