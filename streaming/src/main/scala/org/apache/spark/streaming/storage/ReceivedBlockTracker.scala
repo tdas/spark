@@ -1,4 +1,4 @@
-package org.apache.spark.streaming.scheduler
+package org.apache.spark.streaming.storage
 
 import java.nio.ByteBuffer
 
@@ -13,6 +13,7 @@ import org.apache.spark.streaming.storage.WriteAheadLogManager
 import org.apache.spark.util.Utils
 import org.apache.spark.storage.StreamBlockId
 import org.apache.spark.streaming.util.Clock
+import org.apache.spark.streaming.scheduler.ReceivedBlockInfo
 
 private[streaming] sealed trait ReceivedBlockTrackerRecord
 

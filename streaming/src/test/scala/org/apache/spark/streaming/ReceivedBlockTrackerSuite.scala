@@ -14,12 +14,16 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.spark.{Logging, SparkConf}
 import org.apache.spark.storage.StreamBlockId
 import org.apache.spark.streaming.scheduler._
-import org.apache.spark.streaming.storage.WriteAheadLogReader
+import org.apache.spark.streaming.storage._
 import org.apache.spark.streaming.storage.WriteAheadLogSuite._
 import org.apache.spark.streaming.util.{Clock, ManualClock, SystemClock}
 import org.apache.spark.util.Utils
 import org.scalatest.{BeforeAndAfter, FunSuite, Matchers}
 import org.scalatest.concurrent.Eventually._
+import org.apache.spark.streaming.scheduler.ReceivedBlockInfo
+import org.apache.spark.storage.StreamBlockId
+import scala.Some
+import org.apache.spark.streaming.storage.BlockAddition
 
 class ReceivedBlockTrackerSuite
   extends FunSuite with BeforeAndAfter with Matchers with Logging {

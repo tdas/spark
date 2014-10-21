@@ -22,7 +22,7 @@ private[streaming] case class ByteBufferBlock(byteBuffer: ByteBuffer) extends Re
 
 private[streaming] trait ReceivedBlockHandler {
   def storeBlock(blockId: StreamBlockId, receivedBlock: ReceivedBlock): Option[AnyRef]
-  def clearOldBlocks(threshTime: Long)
+  def cleanupOldBlock(threshTime: Long)
 }
 
 private[streaming] class BlockManagerBasedBlockHandler(
@@ -45,7 +45,7 @@ private[streaming] class BlockManagerBasedBlockHandler(
     None
   }
 
-  def clearOldBlocks(threshTime: Long) {
+  def cleanupOldBlock(threshTime: Long) {
     // this is not used as blocks inserted into the BlockManager are cleared by DStream's clearing
     // of BlockRDDs.
   }
@@ -104,7 +104,7 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
     Some(Await.result(combinedFuture, blockStoreTimeout))
   }
 
-  def clearOldBlocks(threshTime: Long) {
+  def cleanupOldBlock(threshTime: Long) {
     logManager.cleanupOldLogs(threshTime)
   }
 

@@ -31,7 +31,7 @@ import org.apache.spark.SerializableWritable
 import org.apache.spark.storage.StreamBlockId
 import org.apache.spark.streaming.{StreamingContext, Time}
 import org.apache.spark.streaming.receiver.{Receiver, ReceiverSupervisorImpl, StopReceiver}
-import org.apache.spark.streaming.storage.{FileSegment, WriteAheadLogManager}
+import org.apache.spark.streaming.storage.{ReceivedBlockTracker, FileSegment, WriteAheadLogManager}
 import org.apache.spark.util.Utils
 
 /** Information about blocks received by the receiver */
