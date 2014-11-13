@@ -72,10 +72,11 @@ class ReliableKafkaReceiver[
    * A HashMap to manage the offset for each topic/partition, this HashMap is called in
    * synchronized block, so mutable HashMap will not meet concurrency issue.
    */
-  private var topicPartitionOffsetMap: mutable.HashMap[TopicAndPartition, Long] = null
+  private var topicPartitionToOffset: mutable.HashMap[TopicAndPartition, Long] = null
 
   /** A concurrent HashMap to store the stream block id and related offset snapshot. */
-  private var blockOffsetMap: ConcurrentHashMap[StreamBlockId, Map[TopicAndPartition, Long]] = null
+  private var blockToOffsetMap:
+    ConcurrentHashMap[StreamBlockId, Map[TopicAndPartition, Long]] = null
 
   /**
    * Manage the BlockGenerator in receiver itself for better managing block store and offset
@@ -86,17 +87,19 @@ class ReliableKafkaReceiver[
   /** Thread pool running the handlers for receiving message from multiple topics and partitions. */
   private var messageHandlerThreadPool: ThreadPoolExecutor = null
 
+  private var currentBlockId: StreamBlockId = null
+
   override def onStart(): Unit = {
     logInfo(s"Starting Kafka Consumer Stream with group: $groupId")
 
     // Initialize the topic-partition / offset hash map.
-    topicPartitionOffsetMap = new mutable.HashMap[TopicAndPartition, Long]
+    topicPartitionToOffset = new mutable.HashMap[TopicAndPartition, Long]
 
     // Initialize the stream block id / offset snapshot hash map.
-    blockOffsetMap = new ConcurrentHashMap[StreamBlockId, Map[TopicAndPartition, Long]]()
+    blockToOffsetMap = new ConcurrentHashMap[StreamBlockId, Map[TopicAndPartition, Long]]()
 
     // Initialize the block generator for storing Kafka message.
-    blockGenerator = new BlockGenerator(new GeneratedBlockHandler, streamId, conf)
+    blockGenerator = new CustomBlockGenerator(new GeneratedBlockHandler)
 
     if (kafkaParams.contains(AUTO_OFFSET_COMMIT) && kafkaParams(AUTO_OFFSET_COMMIT) == "true") {
       logWarning(s"$AUTO_OFFSET_COMMIT should be set to false in ReliableKafkaReceiver, " +
@@ -145,11 +148,6 @@ class ReliableKafkaReceiver[
   }
 
   override def onStop(): Unit = {
-    if (messageHandlerThreadPool != null) {
-      messageHandlerThreadPool.shutdown()
-      messageHandlerThreadPool = null
-    }
-
     if (consumerConnector != null) {
       consumerConnector.shutdown()
       consumerConnector = null
@@ -160,19 +158,24 @@ class ReliableKafkaReceiver[
       zkClient = null
     }
 
+    if (messageHandlerThreadPool != null) {
+      messageHandlerThreadPool.shutdown()
+      messageHandlerThreadPool = null
+    }
+
     if (blockGenerator != null) {
       blockGenerator.stop()
       blockGenerator = null
     }
 
-    if (topicPartitionOffsetMap != null) {
-      topicPartitionOffsetMap.clear()
-      topicPartitionOffsetMap = null
+    if (topicPartitionToOffset != null) {
+      topicPartitionToOffset.clear()
+      topicPartitionToOffset = null
     }
 
-    if (blockOffsetMap != null) {
-      blockOffsetMap.clear()
-      blockOffsetMap = null
+    if (blockToOffsetMap != null) {
+      blockToOffsetMap.clear()
+      blockToOffsetMap = null
     }
   }
 
@@ -181,7 +184,7 @@ class ReliableKafkaReceiver[
       msgAndMetadata: MessageAndMetadata[K, V]): Unit = synchronized {
     val topicAndPartition = TopicAndPartition(msgAndMetadata.topic, msgAndMetadata.partition)
     blockGenerator += ((msgAndMetadata.key, msgAndMetadata.message))
-    topicPartitionOffsetMap.put(topicAndPartition, msgAndMetadata.offset)
+    topicPartitionToOffset.put(topicAndPartition, msgAndMetadata.offset)
   }
 
   /**
@@ -190,17 +193,19 @@ class ReliableKafkaReceiver[
    */
   private def rememberBlockOffsets(blockId: StreamBlockId): Unit = synchronized {
     // Get a snapshot of current offset map and store with related block id.
-    val offsetSnapshot = topicPartitionOffsetMap.toMap
-    blockOffsetMap.put(blockId, offsetSnapshot)
-    topicPartitionOffsetMap.clear()
+    val offsetSnapshot = topicPartitionToOffset.toMap
+    blockToOffsetMap.put(blockId, offsetSnapshot)
+    topicPartitionToOffset.clear()
   }
 
   /** Store the ready-to-be-stored block and commit the related offsets to zookeeper. */
   private def storeBlockAndCommitOffset(
       blockId: StreamBlockId, arrayBuffer: mutable.ArrayBuffer[_]): Unit = {
+    println("Storing block " + blockId)
     store(arrayBuffer.asInstanceOf[mutable.ArrayBuffer[(K, V)]])
-    Option(blockOffsetMap.get(blockId)).foreach(commitOffset)
-    blockOffsetMap.remove(blockId)
+
+    Option(blockToOffsetMap.get(blockId)).foreach(commitOffset)
+    blockToOffsetMap.remove(blockId)
   }
 
   /**
@@ -208,12 +213,14 @@ class ReliableKafkaReceiver[
    * metadata schema in Zookeeper.
    */
   private def commitOffset(offsetMap: Map[TopicAndPartition, Long]): Unit = {
+    println("Committing offset " + offsetMap)
     if (zkClient == null) {
       val thrown = new IllegalStateException("Zookeeper client is unexpectedly null")
       stop("Zookeeper client is not initialized before commit offsets to ZK", thrown)
       return
     }
 
+    println("Really committing offset")
     for ((topicAndPart, offset) <- offsetMap) {
       try {
         val topicDirs = new ZKGroupTopicDirs(groupId, topicAndPart.topic)
@@ -221,13 +228,14 @@ class ReliableKafkaReceiver[
 
         ZkUtils.updatePersistentPath(zkClient, zkPath, offset.toString)
       } catch {
-        case t: Throwable => logWarning(s"Exception during commit offset $offset for topic" +
-          s"${topicAndPart.topic}, partition ${topicAndPart.partition}", t)
+        case e: Exception =>
+          logWarning(s"Exception during commit offset $offset for topic" +
+            s"${topicAndPart.topic}, partition ${topicAndPart.partition}", e)
       }
-
       logInfo(s"Committed offset $offset for topic ${topicAndPart.topic}, " +
         s"partition ${topicAndPart.partition}")
     }
+    println("Committed offset " + offsetMap)
   }
 
   /** Class to handle received Kafka message. */
@@ -241,9 +249,20 @@ class ReliableKafkaReceiver[
           }
         } catch {
           case e: Exception =>
-            logError("Error handling message", e)
+            restart("Error handling message", e)
         }
       }
+    }
+  }
+
+  /**
+   * Custom BlockGenerator class that synchronizes on the Receiver object before
+   * switching the receiving buffer.
+   */
+  private final class CustomBlockGenerator(listener: BlockGeneratorListener)
+    extends BlockGenerator(listener, streamId, conf) {
+    override def updateCurrentBuffer(time: Long): Unit = ReliableKafkaReceiver.this.synchronized {
+      super.updateCurrentBuffer(time)
     }
   }
 
@@ -257,11 +276,12 @@ class ReliableKafkaReceiver[
 
     override def onPushBlock(blockId: StreamBlockId, arrayBuffer: mutable.ArrayBuffer[_]): Unit = {
       // Store block and commit the blocks offset
+      println("on push block called")
       storeBlockAndCommitOffset(blockId, arrayBuffer)
     }
 
     override def onError(message: String, throwable: Throwable): Unit = {
-      reportError(message, throwable)
+      restart(message, throwable)
     }
   }
 }
