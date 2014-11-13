@@ -18,7 +18,7 @@
 package org.apache.spark.streaming.kafka
 
 import java.util.Properties
-import java.util.concurrent.{ThreadPoolExecutor, ConcurrentHashMap}
+import java.util.concurrent.{ConcurrentHashMap, ThreadPoolExecutor}
 
 import scala.collection.{Map, mutable}
 import scala.reflect.{ClassTag, classTag}

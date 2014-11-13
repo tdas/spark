@@ -18,6 +18,8 @@
 package org.apache.spark.streaming.kafka
 
 
+import java.io.File
+
 import scala.collection.mutable
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -26,14 +28,13 @@ import scala.util.Random
 import com.google.common.io.Files
 import kafka.serializer.StringDecoder
 import kafka.utils.{ZKGroupTopicDirs, ZkUtils}
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
+import org.apache.commons.io.FileUtils
+import org.scalatest.BeforeAndAfter
 import org.scalatest.concurrent.Eventually
 
 import org.apache.spark.SparkConf
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
-import java.io.File
-import org.apache.commons.io.FileUtils
 
 class ReliableKafkaStreamSuite extends KafkaStreamSuiteBase with BeforeAndAfter with Eventually {
 
