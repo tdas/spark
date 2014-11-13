@@ -72,10 +72,10 @@ class ReliableKafkaReceiver[
    * A HashMap to manage the offset for each topic/partition, this HashMap is called in
    * synchronized block, so mutable HashMap will not meet concurrency issue.
    */
-  private var topicPartitionToOffset: mutable.HashMap[TopicAndPartition, Long] = null
+  private var topicPartitionOffsetMap: mutable.HashMap[TopicAndPartition, Long] = null
 
   /** A concurrent HashMap to store the stream block id and related offset snapshot. */
-  private var blockToOffsetMap:
+  private var blockOffsetMap:
     ConcurrentHashMap[StreamBlockId, Map[TopicAndPartition, Long]] = null
 
   /**
@@ -93,10 +93,10 @@ class ReliableKafkaReceiver[
     logInfo(s"Starting Kafka Consumer Stream with group: $groupId")
 
     // Initialize the topic-partition / offset hash map.
-    topicPartitionToOffset = new mutable.HashMap[TopicAndPartition, Long]
+    topicPartitionOffsetMap = new mutable.HashMap[TopicAndPartition, Long]
 
     // Initialize the stream block id / offset snapshot hash map.
-    blockToOffsetMap = new ConcurrentHashMap[StreamBlockId, Map[TopicAndPartition, Long]]()
+    blockOffsetMap = new ConcurrentHashMap[StreamBlockId, Map[TopicAndPartition, Long]]()
 
     // Initialize the block generator for storing Kafka message.
     blockGenerator = new CustomBlockGenerator(new GeneratedBlockHandler)
@@ -168,14 +168,14 @@ class ReliableKafkaReceiver[
       blockGenerator = null
     }
 
-    if (topicPartitionToOffset != null) {
-      topicPartitionToOffset.clear()
-      topicPartitionToOffset = null
+    if (topicPartitionOffsetMap != null) {
+      topicPartitionOffsetMap.clear()
+      topicPartitionOffsetMap = null
     }
 
-    if (blockToOffsetMap != null) {
-      blockToOffsetMap.clear()
-      blockToOffsetMap = null
+    if (blockOffsetMap != null) {
+      blockOffsetMap.clear()
+      blockOffsetMap = null
     }
   }
 
@@ -184,7 +184,7 @@ class ReliableKafkaReceiver[
       msgAndMetadata: MessageAndMetadata[K, V]): Unit = synchronized {
     val topicAndPartition = TopicAndPartition(msgAndMetadata.topic, msgAndMetadata.partition)
     blockGenerator += ((msgAndMetadata.key, msgAndMetadata.message))
-    topicPartitionToOffset.put(topicAndPartition, msgAndMetadata.offset)
+    topicPartitionOffsetMap.put(topicAndPartition, msgAndMetadata.offset)
   }
 
   /**
@@ -193,19 +193,18 @@ class ReliableKafkaReceiver[
    */
   private def rememberBlockOffsets(blockId: StreamBlockId): Unit = synchronized {
     // Get a snapshot of current offset map and store with related block id.
-    val offsetSnapshot = topicPartitionToOffset.toMap
-    blockToOffsetMap.put(blockId, offsetSnapshot)
-    topicPartitionToOffset.clear()
+    val offsetSnapshot = topicPartitionOffsetMap.toMap
+    blockOffsetMap.put(blockId, offsetSnapshot)
+    topicPartitionOffsetMap.clear()
   }
 
   /** Store the ready-to-be-stored block and commit the related offsets to zookeeper. */
   private def storeBlockAndCommitOffset(
       blockId: StreamBlockId, arrayBuffer: mutable.ArrayBuffer[_]): Unit = {
-    println("Storing block " + blockId)
     store(arrayBuffer.asInstanceOf[mutable.ArrayBuffer[(K, V)]])
 
-    Option(blockToOffsetMap.get(blockId)).foreach(commitOffset)
-    blockToOffsetMap.remove(blockId)
+    Option(blockOffsetMap.get(blockId)).foreach(commitOffset)
+    blockOffsetMap.remove(blockId)
   }
 
   /**
@@ -213,14 +212,12 @@ class ReliableKafkaReceiver[
    * metadata schema in Zookeeper.
    */
   private def commitOffset(offsetMap: Map[TopicAndPartition, Long]): Unit = {
-    println("Committing offset " + offsetMap)
     if (zkClient == null) {
       val thrown = new IllegalStateException("Zookeeper client is unexpectedly null")
       stop("Zookeeper client is not initialized before commit offsets to ZK", thrown)
       return
     }
 
-    println("Really committing offset")
     for ((topicAndPart, offset) <- offsetMap) {
       try {
         val topicDirs = new ZKGroupTopicDirs(groupId, topicAndPart.topic)
@@ -235,7 +232,6 @@ class ReliableKafkaReceiver[
       logInfo(s"Committed offset $offset for topic ${topicAndPart.topic}, " +
         s"partition ${topicAndPart.partition}")
     }
-    println("Committed offset " + offsetMap)
   }
 
   /** Class to handle received Kafka message. */
@@ -276,7 +272,6 @@ class ReliableKafkaReceiver[
 
     override def onPushBlock(blockId: StreamBlockId, arrayBuffer: mutable.ArrayBuffer[_]): Unit = {
       // Store block and commit the blocks offset
-      println("on push block called")
       storeBlockAndCommitOffset(blockId, arrayBuffer)
     }
 
