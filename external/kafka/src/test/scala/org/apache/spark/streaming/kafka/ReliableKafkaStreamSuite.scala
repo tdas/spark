@@ -95,7 +95,6 @@ class ReliableKafkaStreamSuite extends KafkaStreamSuiteBase with BeforeAndAfter 
         }
       }
     ssc.start()
-
     eventually(timeout(20000 milliseconds), interval(200 milliseconds)) {
       // A basic process verification for ReliableKafkaReceiver.
       // Verify whether received message number is equal to the sent message number.
@@ -104,26 +103,10 @@ class ReliableKafkaStreamSuite extends KafkaStreamSuiteBase with BeforeAndAfter 
       data.keys.foreach { k => assert(data(k) === result(k).toInt) }
       // Verify the offset number whether it is equal to the total message number.
       assert(getCommitOffset(groupId, topic, 0) === Some(29L))
-
     }
     ssc.stop()
   }
-/*
-  test("Verify the offset commit") {
-    // Verify the correctness of offset commit mechanism.
-    createTopic(topic)
-    produceAndSendMessage(topic, data)
 
-    // Do this to consume all the message of this group/topic.
-    val stream = KafkaUtils.createStream[String, String, StringDecoder, StringDecoder](
-      ssc, kafkaParams, Map(topic -> 1), StorageLevel.MEMORY_ONLY)
-    stream.foreachRDD(_ => Unit)
-    ssc.start()
-    eventually(timeout(20000 milliseconds), interval(200 milliseconds)) {
-    }
-    ssc.stop()
-  }
-*/
   test("Reliable Kafka input stream with multiple topics") {
     val topics = Map("topic1" -> 1, "topic2" -> 1, "topic3" -> 1)
     topics.foreach { case (t, _) =>
