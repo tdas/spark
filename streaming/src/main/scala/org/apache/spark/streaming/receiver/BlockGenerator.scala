@@ -131,8 +131,8 @@ private[streaming] class BlockGenerator(
     } catch {
       case ie: InterruptedException =>
         logInfo("Block pushing thread was interrupted")
-      case t: Throwable =>
-        reportError("Error in block pushing thread", t)
+      case e: Exception =>
+        reportError("Error in block pushing thread", e)
     }
   }
 
@@ -143,6 +143,6 @@ private[streaming] class BlockGenerator(
   
   private def pushBlock(block: Block) {
     listener.onPushBlock(block.id, block.buffer)
-    println("Pushed block " + block.id)
+    logInfo("Pushed block " + block.id)
   }
 }
