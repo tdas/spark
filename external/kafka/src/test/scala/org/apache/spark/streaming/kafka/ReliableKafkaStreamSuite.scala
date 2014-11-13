@@ -135,7 +135,6 @@ class ReliableKafkaStreamSuite extends KafkaStreamSuiteBase with BeforeAndAfter 
     assert(zkClient != null, "Zookeeper client is not initialized")
     val topicDirs = new ZKGroupTopicDirs(groupId, topic)
     val zkPath = s"${topicDirs.consumerOffsetDir}/$partition"
-    val offset = ZkUtils.readDataMaybeNull(zkClient, zkPath)._1.map(_.toLong)
-    offset
+    ZkUtils.readDataMaybeNull(zkClient, zkPath)._1.map(_.toLong)
   }
 }
