@@ -18,7 +18,7 @@
 package org.apache.spark.streaming
 
 import java.io.InputStream
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicReference, AtomicInteger}
 
 import scala.collection.Map
 import scala.collection.mutable.Queue
@@ -526,8 +526,12 @@ class StreamingContext private[streaming] (
     }
     validate()
     sparkContext.setCallSite(DStream.getCreationSite())
-    scheduler.start()
-    state = Started
+    StreamingContext.CONTEXT_START_LOCK.synchronized {
+      StreamingContext.assertNoOtherContextIsRunning()
+      scheduler.start()
+      state = Started
+      StreamingContext.setStartedContext(this)
+    }
   }
 
   /**
@@ -598,6 +602,7 @@ class StreamingContext private[streaming] (
     uiTab.foreach(_.detach())
     // The state should always be Stopped after calling `stop()`, even if we haven't started yet:
     state = Stopped
+    StreamingContext.setStartedContext(null)
   }
 }
 
@@ -608,7 +613,23 @@ class StreamingContext private[streaming] (
 
 object StreamingContext extends Logging {
 
-  private[streaming] val DEFAULT_CLEANER_TTL = 3600
+  private val CONTEXT_START_LOCK = new Object()
+  private val activeContext = new AtomicReference[StreamingContext](null)
+
+  private[streaming] def assertNoOtherContextIsRunning(): Unit = {
+    CONTEXT_START_LOCK.synchronized {
+      if (activeContext.get() != null) {
+        throw new SparkException("Only one StreamingContext can be running in this JVM.")
+      }
+    }
+  }
+
+  private[streaming] def setStartedContext(startedContext: StreamingContext): Unit = {
+    CONTEXT_START_LOCK.synchronized {
+      activeContext.set(startedContext)
+    }
+  }
+
 
   @deprecated("Replaced by implicit functions in the DStream companion object. This is " +
     "kept here only for backward compatibility.", "1.3.0")
