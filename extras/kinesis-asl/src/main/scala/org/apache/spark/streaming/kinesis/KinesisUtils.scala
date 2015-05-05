@@ -94,4 +94,19 @@ object KinesisUtils {
     jssc.receiverStream(new KinesisReceiver(jssc.ssc.sc.appName, streamName,
         endpointUrl, checkpointInterval, initialPositionInStream, storageLevel))
   }
+
+
+  @Experimental
+  def createStream(
+                    ssc: StreamingContext,
+                    streamName: String,
+                    endpointUrl: String,
+                    regionId: String,
+                    initialPositionInStream: InitialPositionInStream,
+                    checkpointAppName: String,
+                    checkpointInterval: Duration,
+                    storageLevel: StorageLevel): ReceiverInputDStream[Array[Byte]] = {
+    new ReliableKinesisInputDStream(ssc, streamName, endpointUrl, regionId,
+      initialPositionInStream, checkpointAppName, checkpointInterval, storageLevel)
+  }
 }
