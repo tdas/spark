@@ -55,7 +55,7 @@ class SocketReceiver[T: ClassTag](
     new Thread("Socket Receiver") {
       setDaemon(true)
       override def run() { receive() }
-    }.start()
+    }
   }
 
   def onStop() {
