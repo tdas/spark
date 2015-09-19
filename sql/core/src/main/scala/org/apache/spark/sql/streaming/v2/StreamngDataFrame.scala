@@ -59,10 +59,11 @@ object Examples {
   sdf.window(GlobalWindow.every(10)).agg("col1" -> "max")
 
 
-  
+
   // ==== Questions =====
 
-  // What does this do as the API allows it?
+  // What do these do as the API allows it?
+  sdf.agg("col1" -> "max")
   sdf.groupBy("col3").agg("col1" -> "max")
 
 

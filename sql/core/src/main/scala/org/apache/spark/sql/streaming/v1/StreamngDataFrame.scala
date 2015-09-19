@@ -2,7 +2,7 @@ package org.apache.spark.sql.streaming.v1
 
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.streaming.{GlobalWindow, TimeBasedWindow, WindowSpec}
-import org.apache.spark.sql.{Column, DataFrame, GroupedData, SQLContext}
+import org.apache.spark.sql.{GroupedData, Column, DataFrame, SQLContext}
 
 
 /**
@@ -35,12 +35,19 @@ abstract class WindowedData {
 
   def agg(aggExpr: (String, String), aggExprs: (String, String)*): StreamingDataFrame
 
-  // V2+ ops
+  // V1+ pipelined ops
 
   def select(col: String, cols: String*): WindowedData
 
   def filter(conditionExpr: String): WindowedData
 }
+
+/**
+ * Assume GroupedData has new method window(). In the code below,
+ * it is emulated using GroupedDataToWindowedData helper implicit class
+ */
+
+
 
 
 object Examples {
@@ -60,7 +67,8 @@ object Examples {
 
   // ==== Questions =====
 
-  // What does this do as the API allows it?
+  // What do these do as the API allows it?
+  sdf.agg("col1" -> "max")
   sdf.groupBy("col3").agg("col1" -> "max")
 
 
@@ -70,6 +78,8 @@ object Examples {
 
   def sdf: StreamingDataFrame = null
 
+  // Helper class to enrich GroupedData to have window(). In real implementation,
+  // GroupedData should have a new method window()
   implicit class GroupedDataToWindowedData(groupedData: GroupedData) {
     def window(windowSpec: WindowSpec): WindowedData = null
   }
