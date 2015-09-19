@@ -1,4 +1,4 @@
-package org.apache.spark.sql.streaming.v1
+package org.apache.spark.sql.streaming.v2
 
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.streaming.{GlobalWindow, TimeBasedWindow, WindowSpec}
@@ -30,6 +30,7 @@ abstract class StreamingDataFrame(@transient sqlContext: SQLContext)
 abstract class WindowedData {
 
   // V1 ops
+  def groupBy(col: String, cols: String*): GroupedData
 
   def count(): StreamingDataFrame
 
@@ -49,19 +50,21 @@ object Examples {
   sdf.select("col1", "col2").filter("col3 < 50")
 
   // Windowed grouped count
-  sdf.groupBy("col3").window(TimeBasedWindow.every(10).over(60)).agg("col1" -> "max")
+  sdf.window(TimeBasedWindow.every(10).over(60)).groupBy("col3").agg("col1" -> "max")
 
   // Running grouped count [generate data at what interval?]
-  sdf.groupBy("col3").window(GlobalWindow.every(10)).agg("col1" -> "max")
+  sdf.window(GlobalWindow.every(10)).groupBy("col3").agg("col1" -> "max")
 
   // Running global count [generate data at what interval?]
   sdf.window(GlobalWindow.every(10)).agg("col1" -> "max")
 
 
+  
   // ==== Questions =====
 
   // What does this do as the API allows it?
   sdf.groupBy("col3").agg("col1" -> "max")
+
 
 
   // ==== IGNORE BELOW ====
@@ -69,10 +72,6 @@ object Examples {
   def sqlContext: SQLContext = null
 
   def sdf: StreamingDataFrame = null
-
-  implicit class GroupedDataToWindowedData(groupedData: GroupedData) {
-    def window(windowSpec: WindowSpec): WindowedData = null
-  }
 }
 
 

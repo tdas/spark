@@ -1,4 +1,4 @@
-package org.apache.spark.sql.streaming.v2
+package org.apache.spark.sql.streaming.v3
 
 import org.apache.spark.sql.streaming.{TimeBasedWindow, GlobalWindow, WindowSpec}
 import org.apache.spark.sql.{DataFrame, SQLContext}
@@ -19,7 +19,7 @@ object Examples {
   // Simple selection filtering
   ds.select("col1", "col2").filter("col3 < 50")
 
-  // Window grouped countx
+  // Window grouped count
   ds.window(TimeBasedWindow.every(10).over(60)).groupBy("col3").agg("col1" -> "max")
 
   // Running grouped count [generate data at what interval?]
