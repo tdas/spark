@@ -22,13 +22,11 @@ import scala.collection.mutable.{ArrayBuffer, SynchronizedBuffer}
 import scala.language.existentials
 import scala.reflect.ClassTag
 
-import org.apache.spark.{SparkConf, SparkException}
-import org.apache.spark.SparkContext._
 import org.apache.spark.rdd.{BlockRDD, RDD}
 import org.apache.spark.storage.StorageLevel
-import org.apache.spark.streaming.dstream.{DStream, WindowedDStream}
+import org.apache.spark.streaming.dstream.{TrackStateSpec, DStream, WindowedDStream}
 import org.apache.spark.util.{Clock, ManualClock}
-import org.apache.spark.HashPartitioner
+import org.apache.spark.{HashPartitioner, SparkConf, SparkException}
 
 class BasicOperationsSuite extends TestSuiteBase {
   test("map") {
@@ -630,6 +628,42 @@ class BasicOperationsSuite extends TestSuiteBase {
       }
     }
   }
+
+
+  test("trackStateByKey with emitted states") {
+    val inputData =
+      Seq(
+        Seq("a"),
+        Seq("a", "b"),
+        Seq("a", "b", "c"),
+        Seq("a", "b"),
+        Seq("a"),
+        Seq()
+      )
+
+    val outputData =
+      Seq(
+        Seq(("a", 1)),
+        Seq(("a", 2), ("b", 1)),
+        Seq(("a", 3), ("b", 2), ("c", 1)),
+        Seq(("a", 4), ("b", 3)),
+        Seq(("a", 5)),
+        Seq()
+      )
+
+    val trackStateOp = (s: DStream[String]) => {
+      val updateFunc = (key: String, value: Option[Int], state: State[Int]) => {
+        val sum = value.getOrElse(0) + state.getOrElse(0)
+        val output = (key, sum)
+        state.update(sum)
+        Some(output)
+      }
+      s.map(x => (x, 1)).trackStateByKey(TrackStateSpec(updateFunc))
+    }
+
+    testOperation(inputData, trackStateOp, outputData, true)
+  }
+
 
   /** Test cleanup of RDDs in DStream metadata */
   def runCleanupTest[T: ClassTag](

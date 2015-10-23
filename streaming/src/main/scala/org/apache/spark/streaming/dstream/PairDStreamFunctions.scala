@@ -24,19 +24,18 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.mapred.{JobConf, OutputFormat}
 import org.apache.hadoop.mapreduce.{OutputFormat => NewOutputFormat}
 
-import org.apache.spark.{HashPartitioner, Partitioner}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.streaming.{Duration, Time}
 import org.apache.spark.streaming.StreamingContext.rddToFileName
+import org.apache.spark.streaming.{Duration, Time, TrackStateSpec, TrackStateSpecImpl}
 import org.apache.spark.util.{SerializableConfiguration, SerializableJobConf}
+import org.apache.spark.{HashPartitioner, Partitioner}
 
 /**
  * Extra functions available on DStream of (key, value) pairs through an implicit conversion.
  */
 class PairDStreamFunctions[K, V](self: DStream[(K, V)])
     (implicit kt: ClassTag[K], vt: ClassTag[V], ord: Ordering[K])
-  extends Serializable
-{
+  extends Serializable {
   private[streaming] def ssc = self.ssc
 
   private[streaming] def sparkContext = self.context.sparkContext
@@ -349,6 +348,16 @@ class PairDStreamFunctions[K, V](self: DStream[(K, V)])
       windowDuration, slideDuration, partitioner
     )
   }
+
+  def trackStateByKey[S: ClassTag, T: ClassTag](spec: TrackStateSpec[K, V, S, T]): DStream[T] = {
+    new TrackeStateDStream[K, V, S, T](
+      self,
+      spec.asInstanceOf[TrackStateSpecImpl[K, V, S, T]]
+    ).mapPartitions { partitionIter =>
+      partitionIter.flatMap { _.emittedRecords }
+    }
+  }
+
 
   /**
    * Return a new "state" DStream where the state for each key is updated by applying
