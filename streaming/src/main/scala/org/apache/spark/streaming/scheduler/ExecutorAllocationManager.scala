@@ -6,7 +6,7 @@ import org.apache.spark.streaming.util.RecurringTimer
 import org.apache.spark.util.Clock
 import org.apache.spark.{ExecutorAllocationClient, Logging, SparkConf}
 
-class ExecutorAllocationManager(
+private[streaming] class ExecutorAllocationManager(
     client: ExecutorAllocationClient,
     receiverTracker: ReceiverTracker,
     conf: SparkConf,
@@ -14,12 +14,14 @@ class ExecutorAllocationManager(
     clock: Clock)
   extends StreamingListener with Logging {
 
+  import ExecutorAllocationManager._
+
   private val scalingIntervalSecs = conf.getTimeAsSeconds(
-    "spark.streaming.dynamicAllocation.scalingInterval", "1min")
+    "spark.streaming.dynamicAllocation.scalingInterval", s"${DEFAULT_SCALING_INTERVAL_SECS}s")
   private val scalingUpRatio = conf.getDouble(
-    "spark.streaming.dynamicAllocation.scalingUpRatio", 0.9)
+    "spark.streaming.dynamicAllocation.scalingUpRatio", DEFAULT_SCALE_UP_RATIO)
   private val scalingDownRatio = conf.getDouble(
-    "spark.streaming.dynamicAllocation.scalingDownRatio", 0.4)
+    "spark.streaming.dynamicAllocation.scalingDownRatio", DEFAULT_SCALE_DOWN_RATIO)
 
   @volatile private var batchProcTimeSum = 0L
   @volatile private var batchProcTimeCount = 0
@@ -98,4 +100,10 @@ class ExecutorAllocationManager(
     logInfo("onBatchCompleted called: " + batchCompleted)
     batchCompleted.batchInfo.processingDelay.foreach(addBatchProcTime)
   }
+}
+
+private[streaming] object ExecutorAllocationManager {
+  val DEFAULT_SCALING_INTERVAL_SECS = 60
+  val DEFAULT_SCALE_UP_RATIO = 0.9
+  val DEFAULT_SCALE_DOWN_RATIO = 0.5
 }
