@@ -29,7 +29,8 @@ class ExecutorAllocationManager(
 
   def start(): Unit = {
     timer.start()
-    logInfo("ExecutorAllocationManager started")
+    logInfo(s"ExecutorAllocationManager started with " +
+      s"ratios = [$scalingUpRatio, $scalingDownRatio] and interval = $scalingIntervalSecs sec")
   }
 
   def stop(): Unit = {
@@ -38,13 +39,16 @@ class ExecutorAllocationManager(
   }
 
   private def manageAllocation(): Unit = synchronized {
-    logInfo("Managing executor allocation")
+    logInfo(s"Managing executor allocation with ratios = [$scalingUpRatio, $scalingDownRatio]")
     if (batchProcTimeCount > 0) {
       val averageBatchProcTime = batchProcTimeSum / batchProcTimeCount
       val ratio = averageBatchProcTime.toDouble / batchDurationMs
+      logInfo(s"Average: $averageBatchProcTime, ratio = $ratio" )
       if (ratio > scalingUpRatio) {
         requestExecutors(ratio)
+        logInfo("Requesting executors")
       } else if (ratio < scalingDownRatio) {
+        logInfo("Killing executors")
         killExecutor()
       }
     }
@@ -53,23 +57,31 @@ class ExecutorAllocationManager(
   }
 
   private def requestExecutors(ratio: Double): Unit = {
+
     val allExecIds = client.getExecutorIds()
-    val numExecsToRequest = math.max(math.round(ratio).toInt, 1)
-    client.requestTotalExecutors(allExecIds.size + numExecsToRequest, 0, Map.empty)
+    logInfo(s"Executors (${allExecIds.size}) = ${allExecIds}")
+    val numExecsToRequest = allExecIds.size + math.max(math.round(ratio).toInt, 1)
+    client.requestTotalExecutors(numExecsToRequest, 0, Map.empty)
+    logInfo(s"Requested total $numExecsToRequest")
   }
 
   private def killExecutor(): Unit = {
     val allExecIds = client.getExecutorIds()
+    logInfo(s"Executors (${allExecIds.size}) = ${allExecIds}")
+
     if (allExecIds.nonEmpty) {
       val execIdsWithReceivers = receiverTracker.getAllocatedExecutors().values.flatten.toSeq
       logInfo(s"Removable executors (${execIdsWithReceivers.size}): ${execIdsWithReceivers}")
 
       val removableExecIds = allExecIds.diff(execIdsWithReceivers)
       logInfo(s"Removable executors (${removableExecIds.size}): ${removableExecIds}")
-
-      val execIdToRemove = removableExecIds(Random.nextInt(removableExecIds.size))
-      client.killExecutor(execIdToRemove)
-      logInfo(s"Requested to kill executor $execIdToRemove")
+      if (removableExecIds.nonEmpty) {
+        val execIdToRemove = removableExecIds(Random.nextInt(removableExecIds.size))
+        client.killExecutor(execIdToRemove)
+        logInfo(s"Requested to kill executor $execIdToRemove")
+      } else {
+        logInfo(s"No non-receiver executors to kill")
+      }
     } else {
       logInfo("No executors to kill")
     }
@@ -78,9 +90,12 @@ class ExecutorAllocationManager(
   private def addBatchProcTime(timeMs: Long): Unit = synchronized {
     batchProcTimeSum += timeMs
     batchProcTimeCount += 1
+    logInfo(
+      s"Added batch processing time $timeMs, sum = $batchProcTimeSum, count = $batchProcTimeCount")
   }
 
   override def onBatchCompleted(batchCompleted: StreamingListenerBatchCompleted): Unit = {
+    logInfo("onBatchCompleted called: " + batchCompleted)
     batchCompleted.batchInfo.processingDelay.foreach(addBatchProcTime)
   }
 }

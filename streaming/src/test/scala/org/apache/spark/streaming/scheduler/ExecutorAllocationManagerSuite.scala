@@ -31,6 +31,12 @@ class ExecutorAllocationManagerSuite extends SparkFunSuite
     allocationManagers.foreach { _.stop() }
   }
 
+  test("start") {
+    val allocationManager = createManager()
+
+
+  }
+
   test("requestExecutors") {
     val allocationManager = createManager()
 
@@ -54,6 +60,31 @@ class ExecutorAllocationManagerSuite extends SparkFunSuite
     assert(Seq("1"), 1.1, 2)
     assert(Seq("1", "2"), 1.6, 4)
   }
+
+  test("killExecutor") {
+    val allocationManager = createManager()
+    def assert(
+        execIds: Seq[String],
+      receiverExecIds: Map[Int, Option[String]],
+      expectedKilledExec: Option[String]): Unit = {
+      reset(allocationClient)
+      reset(receiverTracker)
+      when(allocationClient.getExecutorIds()).thenReturn(execIds)
+      when(receiverTracker.getAllocatedExecutors()).thenReturn(receiverExecIds)
+      killExecutor(allocationManager)
+      if (expectedKilledExec.nonEmpty) {
+        verify(allocationClient, times(1)).killExecutor(meq(expectedKilledExec.get))
+      } else {
+        verify(allocationClient, never()).killExecutor(null)
+      }
+    }
+
+    assert(Nil, Map.empty, None)
+    assert(Seq("1"), Map.empty, Some("1"))
+    assert(Seq("1"), Map(1 -> Some("1")), None)
+    assert(Seq("1", "2"), Map(1 -> Some("1")), Some("2"))
+  }
+
 
   private def createManager(conf: SparkConf = new SparkConf): ExecutorAllocationManager = {
     val manager = new ExecutorAllocationManager(
