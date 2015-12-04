@@ -91,6 +91,8 @@ private[streaming] case object AllReceiverIds extends ReceiverTrackerLocalMessag
 private[streaming] case class UpdateReceiverRateLimit(streamUID: Int, newRate: Long)
   extends ReceiverTrackerLocalMessage
 
+private[streaming] case object GetAllReceiverInfo extends ReceiverTrackerLocalMessage
+
 /**
  * This class manages the execution of the receivers of ReceiverInputDStreams. Instance of
  * this class must be created after all input streams have been added and StreamingContext.start()
@@ -230,6 +232,12 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
           endpoint.send(CleanupOldBlocks(cleanupThreshTime))
         }
       }
+    }
+  }
+
+  def getAllocatedExecutors(): Map[Int, Option[String]] = {
+    endpoint.askWithRetry[Map[Int, ReceiverTrackingInfo]](AllReceiverIds).mapValues {
+      _.runningExecutor.map { _.executorId }
     }
   }
 
@@ -509,9 +517,12 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
       case DeregisterReceiver(streamId, message, error) =>
         deregisterReceiver(streamId, message, error)
         context.reply(true)
+
       // Local messages
       case AllReceiverIds =>
         context.reply(receiverTrackingInfos.filter(_._2.state != ReceiverState.INACTIVE).keys.toSeq)
+      case GetAllReceiverInfo =>
+        context.reply(receiverTrackingInfos.toMap)
       case StopAllReceivers =>
         assert(isTrackerStopping || isTrackerStopped)
         stopReceivers()
