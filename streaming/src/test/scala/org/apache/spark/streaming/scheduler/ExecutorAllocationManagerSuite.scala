@@ -43,7 +43,7 @@ class ExecutorAllocationManagerSuite extends SparkFunSuite
       reset(allocationClient)
       reset(receiverTracker)
       when(allocationClient.getExecutorIds()).thenReturn(Seq("1"))
-      when(receiverTracker.getAllocatedExecutors()).thenReturn(Map.empty[Int, Option[String]])
+      when(receiverTracker.getAllocatedExecutors).thenReturn(Map.empty[Int, Option[String]])
       addBatchProcTime(allocationManager, batchProcTimeMs.toLong)
       clock.advance(DEFAULT_SCALING_INTERVAL_SECS * 1000)
       eventually(timeout(10 seconds)) {
@@ -133,7 +133,7 @@ class ExecutorAllocationManagerSuite extends SparkFunSuite
       reset(allocationClient)
       reset(receiverTracker)
       when(allocationClient.getExecutorIds()).thenReturn(execIds)
-      when(receiverTracker.getAllocatedExecutors()).thenReturn(receiverExecIds)
+      when(receiverTracker.getAllocatedExecutors).thenReturn(receiverExecIds)
       killExecutor(allocationManager)
       if (expectedKilledExec.nonEmpty) {
         verify(allocationClient, times(1)).killExecutor(meq(expectedKilledExec.get))

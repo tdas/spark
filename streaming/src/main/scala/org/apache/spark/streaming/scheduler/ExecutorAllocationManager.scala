@@ -72,8 +72,8 @@ private[streaming] class ExecutorAllocationManager(
     logInfo(s"Executors (${allExecIds.size}) = ${allExecIds}")
 
     if (allExecIds.nonEmpty) {
-      val execIdsWithReceivers = receiverTracker.getAllocatedExecutors().values.flatten.toSeq
-      logInfo(s"Removable executors (${execIdsWithReceivers.size}): ${execIdsWithReceivers}")
+      val execIdsWithReceivers = receiverTracker.getAllocatedExecutors.values.flatten.toSeq
+      logInfo(s"Executors with receivers (${execIdsWithReceivers.size}): ${execIdsWithReceivers}")
 
       val removableExecIds = allExecIds.diff(execIdsWithReceivers)
       logInfo(s"Removable executors (${removableExecIds.size}): ${removableExecIds}")
