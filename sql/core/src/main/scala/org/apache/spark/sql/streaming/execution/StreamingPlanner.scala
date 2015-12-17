@@ -11,6 +11,6 @@ class StreamingPlanner(val sqlStreamingContext: SQLStreamingContext)
 
   /** A list of execution strategies that can be used by the planner */
   override def strategies: Seq[GenericStrategy[StreamingPlan]] = {
-    BasicOperators :: Nil
+    BasicOperatorsStrategy :: Nil
   }
 }

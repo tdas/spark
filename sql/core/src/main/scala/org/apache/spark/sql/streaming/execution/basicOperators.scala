@@ -33,3 +33,9 @@ case class Filter(condition: Expression, child: StreamingPlan) extends UnaryNode
 case class PhysicalDStream(output: Seq[Attribute], dstream: DStream[InternalRow]) extends LeafNode {
   override def execute(): DStream[InternalRow] = dstream
 }
+
+
+case class WindowedAggregation(
+    groupingExpressions: Seq[Expression],
+
+  )

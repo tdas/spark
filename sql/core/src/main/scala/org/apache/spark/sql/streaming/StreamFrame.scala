@@ -39,7 +39,7 @@ class StreamFrame(
 
   def selectExpr(exprs: String*): StreamFrame = {
     select(exprs.map { expr =>
-      Column(new SqlParser().parseExpression(expr))
+      Column(SqlParser.parseExpression(expr))
     }: _*)
   }
 
@@ -47,7 +47,7 @@ class StreamFrame(
   def filter(condition: Column): StreamFrame = catalystLogical.Filter(condition.expr, logicalPlan)
 
   def filter(conditionExpr: String): StreamFrame = {
-    filter(Column(new SqlParser().parseExpression(conditionExpr)))
+    filter(Column(SqlParser.parseExpression(conditionExpr)))
   }
 
   def print(): Unit = {
