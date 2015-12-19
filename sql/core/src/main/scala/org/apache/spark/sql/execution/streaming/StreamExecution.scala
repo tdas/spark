@@ -18,6 +18,7 @@
 package org.apache.spark.sql.execution.streaming
 
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.types.{LongType, DataType, StructField, StructType}
 import org.apache.spark.{Accumulator, Logging}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
@@ -28,6 +29,10 @@ import org.apache.spark.sql.catalyst.plans.logical.{LocalRelation, LogicalPlan}
 import org.apache.spark.sql.execution.{SparkPlan, QueryExecution, LogicalRDD}
 
 class EventTimeSource(val max: Accumulator[LongOffset]) extends Source with Serializable {
+
+  override def schema: StructType = StructType(Seq(
+    StructField("watermark", LongType, nullable = false)))
+
   override def offset: Offset = max.value
 
   override def getSlice(
@@ -62,7 +67,7 @@ class StreamExecution(
 
   /** All stream sources present the query plan. */
   private val sources =
-    logicalPlan.collect { case s: Source => s: Source } :+ eventTimeSource
+    logicalPlan.collect { case s: SourceLeafNode => s.source } :+ eventTimeSource
 
   // Start the execution at the current Offset for the sink. (i.e. avoid reprocessing data
   // that we have already processed).
@@ -110,10 +115,13 @@ class StreamExecution(
 
       // Replace sources in the logical plan with data that has arrived since the last batch.
       val newPlan = logicalPlan transform {
-        case s: Source if newData.contains(s) =>
-          val batchInput = s.getSlice(sqlContext, currentOffsets(s), newData(s))
-          LogicalRDD(s.output, batchInput)(sqlContext)
-        case s: Source => LocalRelation(s.output)
+        case SourceLeafNode(source, output) =>
+          if (newData.contains(source)) {
+            val batchInput = source.getSlice(sqlContext, currentOffsets(source), newData(source))
+            LogicalRDD(output, batchInput)(sqlContext)
+          } else {
+            LocalRelation(output)
+          }
       }
 
       val optimizerStart = System.nanoTime()

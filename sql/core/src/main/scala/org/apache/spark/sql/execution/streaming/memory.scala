@@ -37,26 +37,31 @@ import org.apache.spark.storage.{StreamBlockId, BlockId}
 
 object MemoryStream {
   protected val currentBlockId = new AtomicInteger(0)
+  protected val memoryStreamId = new AtomicInteger(0)
 
   def apply[A : Encoder]: MemoryStream[A] =
-    new MemoryStream[A](encoderFor[A].schema.toAttributes)
+    new MemoryStream[A](memoryStreamId.getAndIncrement())
 }
 
-case class MemoryStream[A : Encoder](output: Seq[Attribute]) extends LeafNode with Source {
+case class MemoryStream[A : Encoder](id: Int) extends Source with Logging {
+  protected val encoder = encoderFor[A]
+  protected val logicalPlan = new SourceLeafNode(this)
+  protected val output = logicalPlan.output
   protected var blocks = new ArrayBuffer[BlockId]
   protected var currentOffset: LongOffset = new LongOffset(-1)
-  protected val encoder = encoderFor[A]
 
   protected def blockManager = SparkEnv.get.blockManager
+
+  def schema: StructType = encoder.schema
 
   def offset: Offset = currentOffset
 
   def toDS()(implicit sqlContext: SQLContext): Dataset[A] = {
-    new Dataset(sqlContext, this)
+    new Dataset(sqlContext, logicalPlan)
   }
 
   def toDF()(implicit sqlContext: SQLContext): DataFrame = {
-    new DataFrame(sqlContext, this)
+    new DataFrame(sqlContext, logicalPlan)
   }
 
   def addData(data: TraversableOnce[A]): Offset = {

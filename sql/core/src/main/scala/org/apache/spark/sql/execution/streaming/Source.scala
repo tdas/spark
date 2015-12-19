@@ -18,10 +18,16 @@
 package org.apache.spark.sql.execution.streaming
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.{DataFrame, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.plans.logical.LeafNode
+import org.apache.spark.sql.types.StructType
 
-trait Source {
+trait Source  {
+
+  def schema: StructType
+
   /** Returns the maximum offset that can be retrieved from the source. */
   def offset: Offset
 
@@ -31,3 +37,12 @@ trait Source {
    */
   def getSlice(sqlContext: SQLContext, start: Offset, end: Offset): RDD[InternalRow]
 }
+
+case class SourceLeafNode(source: Source, output: Seq[Attribute]) extends LeafNode {
+  override def toString(): String = source.toString
+}
+
+object SourceLeafNode {
+  def apply(source: Source): SourceLeafNode = SourceLeafNode(source, source.schema.toAttributes)
+}
+

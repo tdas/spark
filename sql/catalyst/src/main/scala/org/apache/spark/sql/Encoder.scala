@@ -157,6 +157,8 @@ object Encoders {
     */
   def TIMESTAMP: Encoder[java.sql.Timestamp] = ExpressionEncoder()
 
+  def BINARY: Encoder[Array[Byte]] = ExpressionEncoder()
+
   /**
    * Creates an encoder for Java Bean of type T.
    *
