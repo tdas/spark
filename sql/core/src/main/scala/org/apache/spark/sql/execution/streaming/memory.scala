@@ -45,7 +45,7 @@ object MemoryStream {
 
 case class MemoryStream[A : Encoder](id: Int) extends Source with Logging {
   protected val encoder = encoderFor[A]
-  protected val logicalPlan = new SourceLeafNode(this)
+  protected val logicalPlan = SourceLeafNode(this)
   protected val output = logicalPlan.output
   protected var blocks = new ArrayBuffer[BlockId]
   protected var currentOffset: LongOffset = new LongOffset(-1)
