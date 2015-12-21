@@ -78,10 +78,10 @@ case class MemoryStream[A : Encoder](id: Int) extends Source with Logging {
     }
   }
 
-  def getSlice(sqlContext: SQLContext, start: Offset, end: Offset): RDD[InternalRow] = {
+  def getSlice(sqlContext: SQLContext, start: Option[Offset], end: Offset): RDD[InternalRow] = {
     val newBlocks =
       blocks.slice(
-        start.asInstanceOf[LongOffset].offset.toInt + 1,
+        start.map(_.asInstanceOf[LongOffset]).getOrElse(LongOffset(-1)).offset.toInt + 1,
         end.asInstanceOf[LongOffset].offset.toInt + 1).toArray
     logDebug(s"Running [$start, $end] on blocks ${newBlocks.mkString(", ")}")
     new BlockRDD[InternalRow](sqlContext.sparkContext, newBlocks)

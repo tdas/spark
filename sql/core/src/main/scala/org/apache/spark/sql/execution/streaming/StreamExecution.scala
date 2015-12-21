@@ -36,7 +36,7 @@ class EventTimeSource(val max: Accumulator[LongOffset]) extends Source with Seri
   override def offset: Offset = max.value
 
   override def getSlice(
-      sqlContext: SQLContext, start: Offset, end: Offset): RDD[InternalRow] = ???
+      sqlContext: SQLContext, start: Option[Offset], end: Offset): RDD[InternalRow] = ???
 
   // HACK
   override def equals(other: Any): Boolean = other.isInstanceOf[EventTimeSource]
@@ -72,8 +72,9 @@ class StreamExecution(
   // Start the execution at the current Offset for the sink. (i.e. avoid reprocessing data
   // that we have already processed).
   sources.foreach { s =>
-    val sourceOffset = sink.currentOffset(s).getOrElse(LongOffset(-1))
-    currentOffsets.update(s, sourceOffset)
+    sink.currentOffset(s).foreach { offset =>
+      currentOffsets.update(s, offset)
+    }
   }
 
   // Restore the position of the eventtime Offset accumulator
@@ -81,7 +82,7 @@ class StreamExecution(
     case w: LongOffset => eventTimeSource.max.setValue(w)
   }
 
-  logInfo(s"Stream running at $currentOffsets")
+  println(s"Stream running at $currentOffsets")
 
   /** When false, signals to the microBatchThread that it should stop running. */
   @volatile private var shouldRun = true
@@ -95,6 +96,7 @@ class StreamExecution(
   }
   microBatchThread.setDaemon(true)
   microBatchThread.start()
+  println("started")
 
   var lastExecution: QueryExecution = null
 
@@ -103,10 +105,13 @@ class StreamExecution(
    * a batch is executed and passed to the sink, updating the currentOffsets.
    */
   private def attemptBatch(): Unit = {
-    // Check to see if any of the input sources have data that has not been processed.
-    val newData = sources.flatMap {
-      case s if s.offset > currentOffsets(s) => s -> s.offset :: Nil
-      case _ => Nil
+
+    val newData = sources.flatMap { s =>
+      val prevOffset = currentOffsets.get(s)
+      val latestOffset = s.offset
+      if (prevOffset.isEmpty || latestOffset > prevOffset.get) {
+        Some(s -> latestOffset)
+      } else None
     }.toMap
 
     if (newData.nonEmpty) {
@@ -117,7 +122,7 @@ class StreamExecution(
       val newPlan = logicalPlan transform {
         case SourceLeafNode(source, output) =>
           if (newData.contains(source)) {
-            val batchInput = source.getSlice(sqlContext, currentOffsets(source), newData(source))
+            val batchInput = source.getSlice(sqlContext, currentOffsets.get(source), newData(source))
             LogicalRDD(output, batchInput)(sqlContext)
           } else {
             LocalRelation(output)
@@ -179,7 +184,7 @@ class StreamExecution(
   def awaitOffset(source: Source, newOffset: Offset): Unit = {
     assert(microBatchThread.isAlive)
 
-    while (currentOffsets(source) < newOffset) {
+    while (!currentOffsets.contains(source) || currentOffsets(source) < newOffset) {
       logInfo(s"Waiting until $newOffset at $source")
       synchronized { wait() }
     }

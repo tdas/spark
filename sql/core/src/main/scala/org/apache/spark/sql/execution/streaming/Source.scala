@@ -26,6 +26,7 @@ import org.apache.spark.sql.types.StructType
 
 trait Source  {
 
+  /** Returns the schema of the data from this source */
   def schema: StructType
 
   /** Returns the maximum offset that can be retrieved from the source. */
@@ -35,7 +36,13 @@ trait Source  {
    * Returns the data between the `start` and `end` offsets.  This function must always return
    * the same set of data for any given pair of offsets.
    */
-  def getSlice(sqlContext: SQLContext, start: Offset, end: Offset): RDD[InternalRow]
+  def getSlice(sqlContext: SQLContext, start: Option[Offset], end: Offset): RDD[InternalRow]
+}
+
+object Source {
+  def toDF(source: Source)(implicit sqlContext: SQLContext): DataFrame = {
+    new DataFrame(sqlContext, SourceLeafNode(source))
+  }
 }
 
 case class SourceLeafNode(source: Source, output: Seq[Attribute]) extends LeafNode {
