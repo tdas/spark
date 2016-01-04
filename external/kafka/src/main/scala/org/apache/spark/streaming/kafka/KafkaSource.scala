@@ -30,20 +30,18 @@ import org.apache.spark.sql.{DataFrame, Dataset, SQLContext}
 private[kafka]
 case class KafkaSourceOffset(offsets: Map[TopicAndPartition, Long]) extends Offset {
 
-  private lazy val offsetMap = offsets.toMap
-
   override def isEmpty: Boolean = offsets.isEmpty
 
   override def >(other: Offset): Boolean = {
 
-    // For a topic+partition, this comparison returns true if
+    // This comparison returns true, if for each topic+partition, the offset
     // - exists in both `this` and `other`, and this offset > other offset
     // - does not exist in both `this` and `other
 
     other match {
       case KafkaSourceOffset(otherOffsets) =>
         otherOffsets.forall { case (otherTp, otherOffset) =>
-          offsetMap.get(otherTp).map { _ >  otherOffset }.getOrElse { true }
+          offsets.get(otherTp).map { _ >  otherOffset }.getOrElse { true }
         }
       case _ =>
         throw new IllegalArgumentException(s"Invalid comparison of $getClass with ${other.getClass}")
@@ -52,21 +50,19 @@ case class KafkaSourceOffset(offsets: Map[TopicAndPartition, Long]) extends Offs
 
   override def <(other: Offset): Boolean = {
 
-    // For a topic+partition, this comparison returns true if
+    // This comparison returns true, if for each topic+partition, the offset
     // - exists in both `this` and `other`, and this offset < other offset
     // - does not exist in both `this` and `other
 
     other match {
       case KafkaSourceOffset(otherOffsets) =>
         otherOffsets.forall { case (otherTp, otherOffset) =>
-          offsetMap.get(otherTp).map { _ < otherOffset }.getOrElse { true }
+          offsets.get(otherTp).map { _ < otherOffset }.getOrElse { true }
         }
       case _ =>
         throw new IllegalArgumentException(s"Invalid comparison of $getClass with ${other.getClass}")
     }
   }
-
-  def toMap: Map[TopicAndPartition, Long] = offsetMap
 
   override def toString(): String = offsets.toSeq.mkString("[", ", ", "]")
 }
@@ -89,9 +85,9 @@ private[kafka] case class KafkaSource(
   implicit private val encoder = ExpressionEncoder.tuple(
     ExpressionEncoder[Array[Byte]](), ExpressionEncoder[Array[Byte]]())
 
-  private val kc = new KafkaCluster(params)
-  private val topicAndPartitions = KafkaCluster.checkErrors(kc.getPartitions(topics))
-
+  @transient private val kc = new KafkaCluster(params)
+  @transient private val topicAndPartitions = KafkaCluster.checkErrors(kc.getPartitions(topics))
+  @transient private lazy val initialOffsets = getInitialOffsets()
 
   override def schema: StructType = encoder.schema
 
@@ -108,34 +104,19 @@ private[kafka] case class KafkaSource(
     * the same set of data for any given pair of offsets.
     */
   override def getSlice(sqlContext: SQLContext, start: Option[Offset], end: Offset): RDD[InternalRow] = {
-    println(s"Getting slice from $start to $end")
-    val fromKafkaOffsets = start match {
-      case Some(o) => KafkaSourceOffset.fromOffset(o).offsets.toSeq
-      case None =>
-        if (params.get("auto.offset.reset").map(_.toLowerCase) == Some("smallest")) {
-          val topicPartitions = KafkaSourceOffset.fromOffset(end).offsets.keySet
-          KafkaCluster.checkErrors(kc.getEarliestLeaderOffsets(topicPartitions)).mapValues(_.offset)
-        } else Nil
-    }
-    val untilKafkaOffsets = KafkaSourceOffset.fromOffset(end)
-    val offsetRanges = {
-      val untilKafkaOffsetMap = untilKafkaOffsets.toMap
-      fromKafkaOffsets.map { case (tp, fromOffset) =>
-        untilKafkaOffsetMap.get(tp) match {
-          case Some(untilOffset) => OffsetRange(tp, fromOffset, untilOffset)
-          case None => OffsetRange(tp, fromOffset, fromOffset + 1)
-        }
-      }.toSeq
-    }
 
+    val offsetRanges = getOffsetRanges(start, end)
+    val kafkaParams = params
+    val encodingFunc = encoder.toRow _
+    val sparkContext = sqlContext.sparkContext
     println("Creating RDD with offset ranges: " + offsetRanges)
     val kafkaRdd = if (offsetRanges.nonEmpty) {
       KafkaUtils.createRDD[Array[Byte], Array[Byte], DefaultDecoder, DefaultDecoder](
-        sqlContext.sparkContext, params, offsetRanges.toArray)
+        sparkContext, kafkaParams, offsetRanges.toArray)
     } else {
-      sqlContext.sparkContext.emptyRDD[(Array[Byte], Array[Byte])]
+      sparkContext.emptyRDD[(Array[Byte], Array[Byte])]
     }
-    kafkaRdd.map(encoder.toRow).map(_.copy())
+    kafkaRdd.map(encodingFunc).map(_.copy())
   }
 
   def toDS()(implicit sqlContext: SQLContext): Dataset[(Array[Byte], Array[Byte])] = {
@@ -146,5 +127,37 @@ private[kafka] case class KafkaSource(
     Source.toDF(this)
   }
 
-  override def toString(): String = "KafkaSource"
+  private def getOffsetRanges(start: Option[Offset], end: Offset): Seq[OffsetRange] = {
+    val fromOffsets = start match {
+      case Some(o) => KafkaSourceOffset.fromOffset(o).offsets
+      case None => initialOffsets
+    }
+    val untilOffsets = KafkaSourceOffset.fromOffset(end).offsets
+
+    val allTopicAndPartitions = (fromOffsets.keySet ++ untilOffsets.keySet).toSeq
+    allTopicAndPartitions.flatMap { tp =>
+      (fromOffsets.get(tp), untilOffsets.get(tp)) match {
+
+        case (Some(fromOffset), Some(untilOffset)) =>
+          Some(OffsetRange(tp, fromOffset, untilOffset))
+
+        case (Some(fromOffset), None) =>
+          KafkaCluster.checkErrors(kc.getLatestLeaderOffsets(Set(tp))).headOption.map { x =>
+            val untilOffset = x._2.offset + 1
+            OffsetRange(tp, fromOffset, untilOffset)
+          }
+
+        case _ =>
+          None
+      }
+    }
+  }
+
+  private def getInitialOffsets(): Map[TopicAndPartition, Long] = {
+    if (params.get("auto.offset.reset").map(_.toLowerCase) == Some("smallest")) {
+      KafkaCluster.checkErrors(kc.getEarliestLeaderOffsets(topicAndPartitions)).mapValues(_.offset)
+    } else Map.empty
+  }
+
+  override def toString(): String = s"KafkaSource[${topics.mkString(", ")}]"
 }
