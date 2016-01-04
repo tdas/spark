@@ -42,6 +42,8 @@ class EventTimeSource(val max: Accumulator[LongOffset]) extends Source with Seri
   override def equals(other: Any): Boolean = other.isInstanceOf[EventTimeSource]
   override def hashCode: Int = 0
 
+  override def restart(): Source = this
+
   override def toString: String = "EventTime"
 }
 
@@ -67,7 +69,7 @@ class StreamExecution(
 
   /** All stream sources present the query plan. */
   private val sources =
-    logicalPlan.collect { case s: SourceLeafNode => s.source } :+ eventTimeSource
+    logicalPlan.collect { case s: StreamingRelation => s.source } :+ eventTimeSource
 
   // Start the execution at the current Offset for the sink. (i.e. avoid reprocessing data
   // that we have already processed).
@@ -120,7 +122,7 @@ class StreamExecution(
 
       // Replace sources in the logical plan with data that has arrived since the last batch.
       val newPlan = logicalPlan transform {
-        case SourceLeafNode(source, output) =>
+        case StreamingRelation(source, output) =>
           if (newData.contains(source)) {
             val batchInput = source.getSlice(sqlContext, currentOffsets.get(source), newData(source))
             LogicalRDD(output, batchInput)(sqlContext)
@@ -182,8 +184,6 @@ class StreamExecution(
    * least the given `Offset`. This method is indented for use primarily when writing tests.
    */
   def awaitOffset(source: Source, newOffset: Offset): Unit = {
-    assert(microBatchThread.isAlive)
-
     while (!currentOffsets.contains(source) || currentOffsets(source) < newOffset) {
       logInfo(s"Waiting until $newOffset at $source")
       synchronized { wait() }

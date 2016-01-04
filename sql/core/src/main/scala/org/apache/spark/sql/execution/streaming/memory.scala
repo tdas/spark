@@ -45,7 +45,7 @@ object MemoryStream {
 
 case class MemoryStream[A : Encoder](id: Int) extends Source with Logging {
   protected val encoder = encoderFor[A]
-  protected val logicalPlan = SourceLeafNode(this)
+  protected val logicalPlan = StreamingRelation(this)
   protected val output = logicalPlan.output
   protected var blocks = new ArrayBuffer[BlockId]
   protected var currentOffset: LongOffset = new LongOffset(-1)
@@ -86,6 +86,8 @@ case class MemoryStream[A : Encoder](id: Int) extends Source with Logging {
     logDebug(s"Running [$start, $end] on blocks ${newBlocks.mkString(", ")}")
     new BlockRDD[InternalRow](sqlContext.sparkContext, newBlocks)
   }
+
+  def restart(): Source = this
 
   override def toString: String = s"MemoryStream[${output.mkString(",")}]"
 }

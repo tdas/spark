@@ -37,19 +37,24 @@ trait Source  {
    * the same set of data for any given pair of offsets.
    */
   def getSlice(sqlContext: SQLContext, start: Option[Offset], end: Offset): RDD[InternalRow]
+
+  /** For testing. */
+  def restart(): Source
 }
 
 object Source {
   def toDF(source: Source)(implicit sqlContext: SQLContext): DataFrame = {
-    new DataFrame(sqlContext, SourceLeafNode(source))
+    new DataFrame(sqlContext, StreamingRelation(source))
   }
 }
 
-case class SourceLeafNode(source: Source, output: Seq[Attribute]) extends LeafNode {
-  override def toString(): String = source.toString
+
+case class StreamingRelation(source: Source, output: Seq[Attribute]) extends LeafNode {
+  override def toString: String = source.toString
 }
 
-object SourceLeafNode {
-  def apply(source: Source): SourceLeafNode = SourceLeafNode(source, source.schema.toAttributes)
+object StreamingRelation {
+  def apply(source: Source): StreamingRelation =
+    StreamingRelation(source, source.schema.toAttributes)
 }
 
