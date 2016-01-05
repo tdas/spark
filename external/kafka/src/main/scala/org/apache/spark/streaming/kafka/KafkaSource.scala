@@ -160,4 +160,9 @@ private[kafka] case class KafkaSource(
   }
 
   override def toString(): String = s"KafkaSource[${topics.mkString(", ")}]"
+
+  /** For testing. */
+  override def restart(): Source = {
+    new KafkaSource(topics, params)
+  }
 }
