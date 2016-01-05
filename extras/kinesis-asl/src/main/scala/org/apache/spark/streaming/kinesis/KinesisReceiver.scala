@@ -40,6 +40,12 @@ case class SerializableAWSCredentials(accessKeyId: String, secretKey: String)
   override def getAWSSecretKey: String = secretKey
 }
 
+object SerializableAWSCredentials {
+  def apply(credentials: AWSCredentials): SerializableAWSCredentials = {
+    SerializableAWSCredentials(credentials.getAWSAccessKeyId, credentials.getAWSSecretKey)
+  }
+}
+
 /**
  * Custom AWS Kinesis-specific implementation of Spark Streaming's Receiver.
  * This implementation relies on the Kinesis Client Library (KCL) Worker as described here:
