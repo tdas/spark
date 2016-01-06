@@ -260,7 +260,7 @@ abstract class Receiver[T](val storageLevel: StorageLevel) extends Serializable 
   @transient private var _supervisor : ReceiverSupervisor = null
 
   /** Set the ID of the DStream that this receiver is associated with. */
-  private[streaming] def setReceiverId(id_ : Int) {
+  private[spark] def setReceiverId(id_ : Int) {
     id = id_
   }
 

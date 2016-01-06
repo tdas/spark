@@ -16,65 +16,59 @@
  */
 package org.apache.spark.streaming.kinesis
 
-import java.util.UUID
-
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain
 import com.amazonaws.services.kinesis.AmazonKinesisClient
+import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
+
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.execution.streaming.Offset
+import org.apache.spark.storage.BlockId
+import org.apache.spark.streaming.ReceiverSource
+import org.apache.spark.streaming.receiver.Receiver
 
-import scala.collection.JavaConverters._
-import scala.collection.mutable
-import scala.util.control.NonFatal
-
-import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, DefaultAWSCredentialsProviderChain}
-import com.amazonaws.services.kinesis.clientlibrary.interfaces.{IRecordProcessorCheckpointer, IRecordProcessor, IRecordProcessorFactory}
-import com.amazonaws.services.kinesis.clientlibrary.lib.worker.{InitialPositionInStream, KinesisClientLibConfiguration, Worker}
-import com.amazonaws.services.kinesis.model.{GetShardIteratorRequest, Record}
-
-import org.apache.spark.storage.{StorageLevel, StreamBlockId}
-import org.apache.spark.streaming.receiver.{BlockGenerator, BlockGeneratorListener, Receiver}
-import org.apache.spark.Logging
-
-import org.apache.spark.sql.execution.streaming.{Offset, Source}
-
-case class StreamOffset(sequenceNumbers: Map[String, String]) extends Offset {
-  override def isEmpty: Boolean = false
-
-  override def >(other: Offset): Boolean = ???
-
-  override def <(other: Offset): Boolean = ???
-}
-
-case class KinesisSource(
-    endpoint: String,
-    regionId: String,
+private[kinesis] case class KinesisSource(
     streamName: String,
-    credentials: SerializableAWSCredentials) extends Source {
-  private val client = new AmazonKinesisClient(credentials)
-  client.setEndpoint(endpoint, "kinesis", regionId)
+    endpointUrl: String,
+    regionName: String,
+    initialPositionInStream: InitialPositionInStream,
+    awsCredentialsOption: Option[SerializableAWSCredentials] = None)
+  extends ReceiverSource[Array[Byte]]() {
 
-  override def offset: Offset = {
-    val desc = client.describeStream(streamName)
-    val endSequenceNumbers = desc.getStreamDescription.getShards.asScala.map { s =>
-      val range = s.getSequenceNumberRange
-      (s.getShardId, range.getEndingSequenceNumber)
-    }.toMap
-    StreamOffset(endSequenceNumbers)
+  @transient val credentials = awsCredentialsOption.getOrElse {
+    new DefaultAWSCredentialsProviderChain().getCredentials()
   }
 
-  override def getSlice(
-      sqlContext: SQLContext,
-      start: Offset,
-      end: Offset): RDD[InternalRow] = {
+  @transient private val client = new AmazonKinesisClient(credentials)
+  client.setEndpoint(endpointUrl, "kinesis", regionName)
 
+  override def receivers: Seq[Receiver[Array[Byte]] = {
+    val numReceivers = client.describeStream(streamName).getStreamDescription.getShards.size()
+    Seq.fill(numReceivers) {
+      new KinesisReceiver(streamName, endpointUrl, regionName, initialPositionInStream, )
+    }
+  }
 
+  override def getSlice(sqlContext: SQLContext, start: Option[Offset], end: Offset): RDD[InternalRow] = {
+    val blockInfos = getBlocksByRange(start, end)
+    // This returns true even for when blockInfos is empty
+    val allBlocksHaveRanges = blockInfos.map { _.metadataOption }.forall(_.nonEmpty)
 
-    val getShardIteratorRequest = new GetShardIteratorRequest
-    getShardIteratorRequest.setRequestCredentials(credentials)
-    getShardIteratorRequest.setStreamName(streamName)
-    getShardIteratorRequest.setShardId(shardId)
-    getShardIteratorRequest.setShardIteratorType(iteratorType.toString)
-    getShardIteratorRequest.setStartingSequenceNumber(sequenceNumber)
+    if (allBlocksHaveRanges) {
+      // Create a KinesisBackedBlockRDD, even when there are no blocks
+      val blockIds = blockInfos.map { _.blockId.asInstanceOf[BlockId] }.toArray
+      val seqNumRanges = blockInfos.map {
+        _.metadataOption.get.asInstanceOf[SequenceNumberRanges] }.toArray
+      val isBlockIdValid = blockInfos.map { _.isBlockIdValid() }.toArray
+      val blockRDD = new KinesisBackedBlockRDD(
+        sqlContext.sparkContext, regionName, endpointUrl, blockIds, seqNumRanges,
+        isBlockIdValid = isBlockIdValid,
+        awsCredentialsOption = awsCredentialsOption)
+      val encodingFunc = encoder.toRow _
+      blockRDD.map { encodingFunc }
+    } else {
+      super.getSlice(sqlContext, start, end)
+    }
   }
 }

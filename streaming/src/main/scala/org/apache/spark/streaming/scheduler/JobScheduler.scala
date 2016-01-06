@@ -77,7 +77,7 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     } ssc.addStreamingListener(rateController)
 
     listenerBus.start(ssc.sparkContext)
-    receiverTracker = new ReceiverTracker(ssc)
+    receiverTracker = ReceiverTracker(ssc)
     inputInfoTracker = new InputInfoTracker(ssc)
     receiverTracker.start()
     jobGenerator.start()

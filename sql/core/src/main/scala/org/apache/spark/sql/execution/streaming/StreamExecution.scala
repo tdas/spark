@@ -19,6 +19,8 @@ package org.apache.spark.sql.execution.streaming
 
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.types.{LongType, DataType, StructField, StructType}
+import org.apache.spark.streaming.receiver.Receiver
+import org.apache.spark.streaming.{ReceiverSource, ReceiverExecution}
 import org.apache.spark.{Accumulator, Logging}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
@@ -86,8 +88,22 @@ class StreamExecution(
 
   println(s"Stream running at $currentOffsets")
 
+  private val receiverSources: Seq[ReceiverSource[_]] =
+    logicalPlan.collect { case StreamingRelation(s, _) if s.isInstanceOf[ReceiverSource[_]] =>
+      s.asInstanceOf[ReceiverSource[_]]
+    }
+
+  private val receivers: Seq[Receiver[_]] = receiverSources.flatMap { _.receivers }
+
+  receivers.zipWithIndex.map { case (r, i) =>
+    r.setReceiverId(i)
+  }
+
   /** When false, signals to the microBatchThread that it should stop running. */
   @volatile private var shouldRun = true
+
+  private val receiverExecution = new ReceiverExecution(sqlContext.sparkContext, receivers)
+  receiverExecution.start()
 
   /** The thread that runs the micro-batches of this stream. */
   private[sql] val microBatchThread = new Thread("stream execution thread") {
@@ -107,6 +123,8 @@ class StreamExecution(
    * a batch is executed and passed to the sink, updating the currentOffsets.
    */
   private def attemptBatch(): Unit = {
+
+    receiverExecution.allocateBatch()
 
     val newData = sources.flatMap { s =>
       val prevOffset = currentOffsets.get(s)

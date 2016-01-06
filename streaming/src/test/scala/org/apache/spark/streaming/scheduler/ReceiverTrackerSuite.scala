@@ -38,7 +38,7 @@ class ReceiverTrackerSuite extends TestSuiteBase {
 
       val newRateLimit = 100L
       val inputDStream = new RateTestInputDStream(ssc)
-      val tracker = new ReceiverTracker(ssc)
+      val tracker = ReceiverTracker(ssc)
       tracker.start()
       try {
         // we wait until the Receiver has registered with the tracker,

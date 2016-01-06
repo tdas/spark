@@ -146,6 +146,12 @@ private[streaming] class ReceivedBlockTracker(
     }
   }
 
+  def getAllBatches(): Seq[Time] = {
+    synchronized {
+      timeToAllocatedBlocks.keySet.toSeq
+    }
+  }
+
   /** Check if any blocks are left to be allocated to batches. */
   def hasUnallocatedReceivedBlocks: Boolean = synchronized {
     !streamIdToUnallocatedBlockQueues.values.forall(_.isEmpty)
