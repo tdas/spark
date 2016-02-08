@@ -43,7 +43,7 @@ import org.apache.spark.internal.Logging
 private[kinesis] class KinesisTestUtils extends Logging {
 
   val endpointUrl = KinesisTestUtils.endpointUrl
-  val regionName = RegionUtils.getRegionByEndpoint(endpointUrl).getName()
+  val regionName = KinesisTestUtils.regionName
   val streamShardCount = 2
 
   private val createStreamTimeoutSeconds = 300
@@ -54,6 +54,8 @@ private[kinesis] class KinesisTestUtils extends Logging {
 
   @volatile
   private var _streamName: String = _
+
+  private val shardIdToLatestSeqNum = mutable.HashMap[String, String]()
 
   protected lazy val kinesisClient = {
     val client = new AmazonKinesisClient(KinesisTestUtils.getAWSCredentials())
@@ -106,8 +108,13 @@ private[kinesis] class KinesisTestUtils extends Logging {
     val producer = getProducer(aggregate)
     val shardIdToSeqNumbers = producer.sendData(streamName, testData)
     logInfo(s"Pushed $testData:\n\t ${shardIdToSeqNumbers.mkString("\n\t")}")
+    shardIdToSeqNumbers.foreach { case (shardId, seq) =>
+      shardIdToLatestSeqNum(shardId) = seq.last._2
+    }
     shardIdToSeqNumbers.toMap
   }
+
+  def getLatestSeqNumsOfShards(): Map[String, String] = shardIdToLatestSeqNum.toMap
 
   /**
    * Expose a Python friendly API.
@@ -210,6 +217,8 @@ private[kinesis] object KinesisTestUtils {
     url
   }
 
+  lazy val regionName = RegionUtils.getRegionByEndpoint(endpointUrl).getName()
+
   def isAWSCredentialsPresent: Boolean = {
     Try { new DefaultAWSCredentialsProviderChain().getCredentials() }.isSuccess
   }
@@ -241,19 +250,23 @@ private[kinesis] class SimpleDataGenerator(
     client: AmazonKinesisClient) extends KinesisDataGenerator {
   override def sendData(streamName: String, data: Seq[Int]): Map[String, Seq[(Int, String)]] = {
     val shardIdToSeqNumbers = new mutable.HashMap[String, ArrayBuffer[(Int, String)]]()
+    var seqNumForOrdering: String = null
     data.foreach { num =>
       val str = num.toString
       val data = ByteBuffer.wrap(str.getBytes(StandardCharsets.UTF_8))
       val putRecordRequest = new PutRecordRequest().withStreamName(streamName)
         .withData(data)
         .withPartitionKey(str)
-
+      if (seqNumForOrdering != null) {
+        putRecordRequest.setSequenceNumberForOrdering(seqNumForOrdering)
+      }
       val putRecordResult = client.putRecord(putRecordRequest)
       val shardId = putRecordResult.getShardId
       val seqNumber = putRecordResult.getSequenceNumber()
       val sentSeqNumbers = shardIdToSeqNumbers.getOrElseUpdate(shardId,
         new ArrayBuffer[(Int, String)]())
       sentSeqNumbers += ((num, seqNumber))
+      seqNumForOrdering = seqNumber
     }
 
     shardIdToSeqNumbers.toMap
