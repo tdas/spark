@@ -118,6 +118,7 @@ private[kinesis] class KinesisTestUtils extends Logging {
   def deleteStream(): Unit = {
     try {
       if (streamCreated) {
+        logInfo(s"Deleting stream $streamName")
         kinesisClient.deleteStream(streamName)
       }
     } catch {
@@ -240,19 +241,27 @@ private[kinesis] class SimpleDataGenerator(
     client: AmazonKinesisClient) extends KinesisDataGenerator {
   override def sendData(streamName: String, data: Seq[Int]): Map[String, Seq[(Int, String)]] = {
     val shardIdToSeqNumbers = new mutable.HashMap[String, ArrayBuffer[(Int, String)]]()
+    var seqNumForOrdering: String = null
     data.foreach { num =>
       val str = num.toString
       val data = ByteBuffer.wrap(str.getBytes())
       val putRecordRequest = new PutRecordRequest().withStreamName(streamName)
         .withData(data)
         .withPartitionKey(str)
-
+      if (seqNumForOrdering != null) {
+        putRecordRequest.setSequenceNumberForOrdering(seqNumForOrdering)
+      }
       val putRecordResult = client.putRecord(putRecordRequest)
       val shardId = putRecordResult.getShardId
       val seqNumber = putRecordResult.getSequenceNumber()
       val sentSeqNumbers = shardIdToSeqNumbers.getOrElseUpdate(shardId,
         new ArrayBuffer[(Int, String)]())
+      // scalastyle:off println
+      println(s"$data with key $str in shard ${putRecordResult.getShardId} " +
+        s"and seq ${putRecordResult.getSequenceNumber}")
+      // scalastyle:on println
       sentSeqNumbers += ((num, seqNumber))
+      seqNumForOrdering = seqNumber
     }
 
     shardIdToSeqNumbers.toMap
