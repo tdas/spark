@@ -118,7 +118,6 @@ private[kinesis] class KinesisTestUtils extends Logging {
   def deleteStream(): Unit = {
     try {
       if (streamCreated) {
-        logInfo(s"Deleting stream $streamName")
         kinesisClient.deleteStream(streamName)
       }
     } catch {
@@ -256,10 +255,6 @@ private[kinesis] class SimpleDataGenerator(
       val seqNumber = putRecordResult.getSequenceNumber()
       val sentSeqNumbers = shardIdToSeqNumbers.getOrElseUpdate(shardId,
         new ArrayBuffer[(Int, String)]())
-      // scalastyle:off println
-      println(s"$data with key $str in shard ${putRecordResult.getShardId} " +
-        s"and seq ${putRecordResult.getSequenceNumber}")
-      // scalastyle:on println
       sentSeqNumbers += ((num, seqNumber))
       seqNumForOrdering = seqNumber
     }
