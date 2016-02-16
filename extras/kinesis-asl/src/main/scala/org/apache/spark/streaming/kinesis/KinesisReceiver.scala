@@ -41,7 +41,7 @@ case class SerializableAWSCredentials(accessKeyId: String, secretKey: String)
   override def getAWSSecretKey: String = secretKey
 }
 
-object SerializableAWSCredentials {
+private[kinesis] object SerializableAWSCredentials {
   def apply(credentials: AWSCredentials): SerializableAWSCredentials = {
     new SerializableAWSCredentials(credentials.getAWSAccessKeyId, credentials.getAWSSecretKey)
   }
@@ -339,7 +339,7 @@ private[kinesis] class KinesisReceiver[T](
      * The data addition, block generation, and calls to onAddData and onGenerateBlock
      * are all synchronized through the same lock.
      */
-    def onAddData(data: Any, metadata: Any): Unit = {
+    override def onAddData(data: Any, metadata: Any): Unit = {
       rememberAddedRange(metadata.asInstanceOf[SequenceNumberRange])
     }
 
@@ -348,18 +348,18 @@ private[kinesis] class KinesisReceiver[T](
      * The data addition, block generation, and calls to onAddData and onGenerateBlock
      * are all synchronized through the same lock.
      */
-    def onGenerateBlock(blockId: StreamBlockId): Unit = {
+    override def onGenerateBlock(blockId: StreamBlockId): Unit = {
       finalizeRangesForCurrentBlock(blockId)
     }
 
     /** Callback method called when a block is ready to be pushed / stored. */
-    def onPushBlock(blockId: StreamBlockId, arrayBuffer: mutable.ArrayBuffer[_]): Unit = {
+    override def onPushBlock(blockId: StreamBlockId, arrayBuffer: mutable.ArrayBuffer[_]): Unit = {
       storeBlockWithRanges(blockId,
         arrayBuffer.asInstanceOf[mutable.ArrayBuffer[T]])
     }
 
     /** Callback called in case of any error in internal of the BlockGenerator */
-    def onError(message: String, throwable: Throwable): Unit = {
+    override def onError(message: String, throwable: Throwable): Unit = {
       reportError(message, throwable)
     }
   }
