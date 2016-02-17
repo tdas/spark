@@ -20,8 +20,8 @@ package org.apache.spark.streaming.kinesis
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
 
 import org.apache.spark.SparkEnv
-import org.apache.spark.sql.StreamTest
-import org.apache.spark.sql.execution.streaming.{Offset, Source}
+import org.apache.spark.sql.{AnalysisException, StreamTest}
+import org.apache.spark.sql.execution.streaming.{Offset, Source, StreamingRelation}
 import org.apache.spark.sql.test.SharedSQLContext
 import org.apache.spark.storage.StreamSourceBlockId
 
@@ -112,5 +112,34 @@ class KinesisSourceSuite extends StreamTest with SharedSQLContext with KinesisFu
     } finally {
       testUtils.deleteStream()
     }
+  }
+
+  testIfEnabled("DataFrameReader") {
+    val testUtils = new KPLBasedKinesisTestUtils
+    testUtils.createStream()
+    try {
+      val df = sqlContext.read
+        .option("regionName", testUtils.regionName)
+        .option("endpointUrl", testUtils.endpointUrl)
+        .option("streamNames", testUtils.streamName)
+        .option("initialPosInStream", "TRIM_HORIZON")
+        .kinesis().stream()
+
+      val sources = df.queryExecution.analyzed
+        .collect {
+          case StreamingRelation(s: KinesisSource, _) => s
+        }
+      assert(sources.size === 1)
+    } finally {
+      testUtils.deleteStream()
+    }
+  }
+
+  testIfEnabled("call kinesis when not using stream") {
+    val e = intercept[AnalysisException] {
+      sqlContext.read.kinesis().load()
+    }
+    assert(e.getMessage === "org.apache.spark.streaming.kinesis.DefaultSource is " +
+      "neither a RelationProvider nor a FSBasedRelationProvider.;")
   }
 }
