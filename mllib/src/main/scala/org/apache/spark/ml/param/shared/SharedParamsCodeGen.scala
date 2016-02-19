@@ -44,6 +44,7 @@ private[shared] object SharedParamsCodeGen {
         " probabilities. Note: Not all models output well-calibrated probability estimates!" +
         " These probabilities should be treated as confidences, not precise probabilities",
         Some("\"probability\"")),
+      ParamDesc[String]("varianceCol", "Column name for the biased sample variance of prediction"),
       ParamDesc[Double]("threshold",
         "threshold in binary classification prediction, in range [0, 1]", Some("0.5"),
         isValid = "ParamValidators.inRange(0, 1)", finalMethods = false),
@@ -73,7 +74,9 @@ private[shared] object SharedParamsCodeGen {
       ParamDesc[Double]("tol", "the convergence tolerance for iterative algorithms"),
       ParamDesc[Double]("stepSize", "Step size to be used for each iteration of optimization."),
       ParamDesc[String]("weightCol", "weight column name. If this is not set or empty, we treat " +
-        "all instance weights as 1.0."))
+        "all instance weights as 1.0."),
+      ParamDesc[String]("solver", "the solver algorithm for optimization. If this is not set or " +
+        "empty, default value is 'auto'.", Some("\"auto\"")))
 
     val code = genSharedParams(params)
     val file = "src/main/scala/org/apache/spark/ml/param/shared/sharedParams.scala"

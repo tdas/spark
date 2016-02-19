@@ -528,7 +528,9 @@ class SparseVector(Vector):
             assert len(self.indices) == len(self.values), "index and value arrays not same length"
             for i in xrange(len(self.indices) - 1):
                 if self.indices[i] >= self.indices[i + 1]:
-                    raise TypeError("indices array must be sorted")
+                    raise TypeError(
+                        "Indices %s and %s are not strictly increasing"
+                        % (self.indices[i], self.indices[i + 1]))
 
     def numNonzeros(self):
         """
@@ -556,7 +558,7 @@ class SparseVector(Vector):
     @staticmethod
     def parse(s):
         """
-        Parse string representation back into the DenseVector.
+        Parse string representation back into the SparseVector.
 
         >>> SparseVector.parse(' (4, [0,1 ],[ 4.0,5.0] )')
         SparseVector(4, {0: 4.0, 1: 5.0})
@@ -764,10 +766,14 @@ class SparseVector(Vector):
         if not isinstance(index, int):
             raise TypeError(
                 "Indices must be of type integer, got type %s" % type(index))
+
+        if index >= self.size or index < -self.size:
+            raise ValueError("Index %d out of bounds." % index)
         if index < 0:
             index += self.size
-        if index >= self.size or index < 0:
-            raise ValueError("Index %d out of bounds." % index)
+
+        if (inds.size == 0) or (index > inds.item(-1)):
+            return 0.
 
         insert_index = np.searchsorted(inds, index)
         row_ind = inds[insert_index]

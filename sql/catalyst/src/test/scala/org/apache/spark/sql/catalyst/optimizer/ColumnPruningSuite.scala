@@ -17,12 +17,12 @@
 
 package org.apache.spark.sql.catalyst.optimizer
 
-import org.apache.spark.sql.catalyst.expressions.Explode
-import org.apache.spark.sql.catalyst.plans.PlanTest
-import org.apache.spark.sql.catalyst.plans.logical.{Project, LocalRelation, Generate, LogicalPlan}
-import org.apache.spark.sql.catalyst.rules.RuleExecutor
 import org.apache.spark.sql.catalyst.dsl.expressions._
 import org.apache.spark.sql.catalyst.dsl.plans._
+import org.apache.spark.sql.catalyst.expressions.{Explode, Literal}
+import org.apache.spark.sql.catalyst.plans.PlanTest
+import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.catalyst.rules.RuleExecutor
 import org.apache.spark.sql.types.StringType
 
 class ColumnPruningSuite extends PlanTest {
@@ -35,12 +35,11 @@ class ColumnPruningSuite extends PlanTest {
   test("Column pruning for Generate when Generate.join = false") {
     val input = LocalRelation('a.int, 'b.array(StringType))
 
-    val query = Generate(Explode('b), false, false, None, 's.string :: Nil, input).analyze
+    val query = input.generate(Explode('b), join = false).analyze
+
     val optimized = Optimize.execute(query)
 
-    val correctAnswer =
-      Generate(Explode('b), false, false, None, 's.string :: Nil,
-        Project('b.attr :: Nil, input)).analyze
+    val correctAnswer = input.select('b).generate(Explode('b), join = false).analyze
 
     comparePlans(optimized, correctAnswer)
   }
@@ -49,16 +48,19 @@ class ColumnPruningSuite extends PlanTest {
     val input = LocalRelation('a.int, 'b.int, 'c.array(StringType))
 
     val query =
-      Project(Seq('a, 's),
-        Generate(Explode('c), true, false, None, 's.string :: Nil,
-          input)).analyze
+      input
+        .generate(Explode('c), join = true, outputNames = "explode" :: Nil)
+        .select('a, 'explode)
+        .analyze
+
     val optimized = Optimize.execute(query)
 
     val correctAnswer =
-      Project(Seq('a, 's),
-        Generate(Explode('c), true, false, None, 's.string :: Nil,
-          Project(Seq('a, 'c),
-            input))).analyze
+      input
+        .select('a, 'c)
+        .generate(Explode('c), join = true, outputNames = "explode" :: Nil)
+        .select('a, 'explode)
+        .analyze
 
     comparePlans(optimized, correctAnswer)
   }
@@ -67,15 +69,18 @@ class ColumnPruningSuite extends PlanTest {
     val input = LocalRelation('b.array(StringType))
 
     val query =
-      Project(('s + 1).as("s+1") :: Nil,
-        Generate(Explode('b), true, false, None, 's.string :: Nil,
-          input)).analyze
+      input
+        .generate(Explode('b), join = true, outputNames = "explode" :: Nil)
+        .select(('explode + 1).as("result"))
+        .analyze
+
     val optimized = Optimize.execute(query)
 
     val correctAnswer =
-      Project(('s + 1).as("s+1") :: Nil,
-        Generate(Explode('b), false, false, None, 's.string :: Nil,
-          input)).analyze
+      input
+        .generate(Explode('b), join = false, outputNames = "explode" :: Nil)
+        .select(('explode + 1).as("result"))
+        .analyze
 
     comparePlans(optimized, correctAnswer)
   }
@@ -89,6 +94,35 @@ class ColumnPruningSuite extends PlanTest {
     val correctAnswer = input.select('a, 'b).orderBy('b.asc).select('a).analyze
 
     comparePlans(optimized, correctAnswer)
+  }
+
+  test("Column pruning for Expand") {
+    val input = LocalRelation('a.int, 'b.string, 'c.double)
+    val query =
+      Aggregate(
+        Seq('aa, 'gid),
+        Seq(sum('c).as("sum")),
+        Expand(
+          Seq(
+            Seq('a, 'b, 'c, Literal.create(null, StringType), 1),
+            Seq('a, 'b, 'c, 'a, 2)),
+          Seq('a, 'b, 'c, 'aa.int, 'gid.int),
+          input)).analyze
+    val optimized = Optimize.execute(query)
+
+    val expected =
+      Aggregate(
+        Seq('aa, 'gid),
+        Seq(sum('c).as("sum")),
+        Expand(
+          Seq(
+            Seq('c, Literal.create(null, StringType), 1),
+            Seq('c, 'a, 2)),
+          Seq('c, 'aa.int, 'gid.int),
+          Project(Seq('c, 'a),
+            input))).analyze
+
+    comparePlans(optimized, expected)
   }
 
   // todo: add more tests for column pruning

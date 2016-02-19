@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import org.mockito.Mockito._
 
 import org.apache.spark.SparkFunSuite
-import org.apache.spark.rpc.{RpcEnv, RpcEndpoint, RpcAddress, TestRpcEndpoint}
+import org.apache.spark.rpc.{RpcAddress, RpcEndpoint, RpcEnv, TestRpcEndpoint}
 
 class InboxSuite extends SparkFunSuite {
 
@@ -35,7 +35,7 @@ class InboxSuite extends SparkFunSuite {
     val dispatcher = mock(classOf[Dispatcher])
 
     val inbox = new Inbox(endpointRef, endpoint)
-    val message = ContentMessage(null, "hi", false, null)
+    val message = OneWayMessage(null, "hi")
     inbox.post(message)
     inbox.process(dispatcher)
     assert(inbox.isEmpty)
@@ -55,7 +55,7 @@ class InboxSuite extends SparkFunSuite {
     val dispatcher = mock(classOf[Dispatcher])
 
     val inbox = new Inbox(endpointRef, endpoint)
-    val message = ContentMessage(null, "hi", true, null)
+    val message = RpcMessage(null, "hi", null)
     inbox.post(message)
     inbox.process(dispatcher)
     assert(inbox.isEmpty)
@@ -83,7 +83,7 @@ class InboxSuite extends SparkFunSuite {
       new Thread {
         override def run(): Unit = {
           for (_ <- 0 until 100) {
-            val message = ContentMessage(null, "hi", false, null)
+            val message = OneWayMessage(null, "hi")
             inbox.post(message)
           }
           exitLatch.countDown()
@@ -113,7 +113,7 @@ class InboxSuite extends SparkFunSuite {
     val remoteAddress = RpcAddress("localhost", 11111)
 
     val inbox = new Inbox(endpointRef, endpoint)
-    inbox.post(Associated(remoteAddress))
+    inbox.post(RemoteProcessConnected(remoteAddress))
     inbox.process(dispatcher)
 
     endpoint.verifySingleOnConnectedMessage(remoteAddress)
@@ -127,7 +127,7 @@ class InboxSuite extends SparkFunSuite {
     val remoteAddress = RpcAddress("localhost", 11111)
 
     val inbox = new Inbox(endpointRef, endpoint)
-    inbox.post(Disassociated(remoteAddress))
+    inbox.post(RemoteProcessDisconnected(remoteAddress))
     inbox.process(dispatcher)
 
     endpoint.verifySingleOnDisconnectedMessage(remoteAddress)
@@ -142,7 +142,7 @@ class InboxSuite extends SparkFunSuite {
     val cause = new RuntimeException("Oops")
 
     val inbox = new Inbox(endpointRef, endpoint)
-    inbox.post(AssociationError(cause, remoteAddress))
+    inbox.post(RemoteProcessConnectionError(cause, remoteAddress))
     inbox.process(dispatcher)
 
     endpoint.verifySingleOnNetworkErrorMessage(cause, remoteAddress)

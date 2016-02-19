@@ -101,6 +101,18 @@ class BlockIdSuite extends SparkFunSuite {
     assertSame(id, BlockId(id.toString))
   }
 
+  test("stream-source") {
+    val id = StreamSourceBlockId("test", 100)
+    assertSame(id, StreamSourceBlockId("test", 100))
+    assertDifferent(id, StreamSourceBlockId("test", 101))
+    assert(id.name === "source-test-100")
+    assert(id.asRDDId === None)
+    assert(id.source === "test")
+    assert(id.uniqueId === 100)
+    assert(!id.isBroadcast)
+    assertSame(id, BlockId(id.toString))
+  }
+
   test("test") {
     val id = TestBlockId("abc")
     assertSame(id, TestBlockId("abc"))

@@ -81,7 +81,7 @@ all environment variables used for launching each container. This process is use
 classpath problems in particular. (Note that enabling this requires admin privileges on cluster
 settings and a restart of all node managers. Thus, this is not applicable to hosted clusters).
 
-To use a custom log4j configuration for the application master or executors, there are two options:
+To use a custom log4j configuration for the application master or executors, here are the options:
 
 - upload a custom `log4j.properties` using `spark-submit`, by adding it to the `--files` list of files
   to be uploaded with the application.
@@ -89,6 +89,9 @@ To use a custom log4j configuration for the application master or executors, the
   (for the driver) or `spark.executor.extraJavaOptions` (for executors). Note that if using a file,
   the `file:` protocol should be explicitly provided, and the file needs to exist locally on all
   the nodes.
+- update the `$SPARK_CONF_DIR/log4j.properties` file and it will be automatically uploaded along
+  with the other configurations. Note that other 2 options has higher priority than this option if
+  multiple options are specified.
 
 Note that for the first option, both executors and the application master will share the same
 log4j configuration, which may cause issues when they run on the same node (e.g. trying to write
@@ -108,6 +111,19 @@ If you need a reference to the proper location to put log files in the YARN so t
     In cluster mode, use <code>spark.driver.memory</code> instead.
     <p/>
     Use lower-case suffixes, e.g. <code>k</code>, <code>m</code>, <code>g</code>, <code>t</code>, and <code>p</code>, for kibi-, mebi-, gibi-, tebi-, and pebibytes, respectively.
+  </td>
+</tr>
+<tr>
+  <td><code>spark.driver.memory</code></td>
+  <td>1g</td>
+  <td>
+    Amount of memory to use for the driver process, i.e. where SparkContext is initialized.
+    (e.g. <code>1g</code>, <code>2g</code>).
+
+    <br /><em>Note:</em> In client mode, this config must not be set through the <code>SparkConf</code>
+    directly in your application, because the driver JVM has already started at that point.
+    Instead, please set this through the <code>--driver-memory</code> command line option
+    or in your default properties file.
   </td>
 </tr>
 <tr>
@@ -200,10 +216,24 @@ If you need a reference to the proper location to put log files in the YARN so t
   </td>
 </tr>
 <tr>
+  <td><code>spark.executor.cores</code></td>
+  <td>1 in YARN mode, all the available cores on the worker in standalone mode.</td>
+  <td>
+    The number of cores to use on each executor. For YARN and standalone mode only.
+  </td>
+</tr>
+<tr>
  <td><code>spark.executor.instances</code></td>
   <td><code>2</code></td>
   <td>
     The number of executors. Note that this property is incompatible with <code>spark.dynamicAllocation.enabled</code>. If both <code>spark.dynamicAllocation.enabled</code> and <code>spark.executor.instances</code> are specified, dynamic allocation is turned off and the specified number of <code>spark.executor.instances</code> is used.
+  </td>
+</tr>
+<tr>
+  <td><code>spark.executor.memory</code></td>
+  <td>1g</td>
+  <td>
+    Amount of memory to use per executor process (e.g. <code>2g</code>, <code>8g</code>).
   </td>
 </tr>
 <tr>
@@ -257,10 +287,10 @@ If you need a reference to the proper location to put log files in the YARN so t
   <td>(none)</td>
   <td>
     A comma-separated list of secure HDFS namenodes your Spark application is going to access. For
-    example, <code>spark.yarn.access.namenodes=hdfs://nn1.com:8032,hdfs://nn2.com:8032</code>.
-    The Spark application must have access to the namenodes listed and Kerberos must
-    be properly configured to be able to access them (either in the same realm or in
-    a trusted realm). Spark acquires security tokens for each of the namenodes so that
+    example, <code>spark.yarn.access.namenodes=hdfs://nn1.com:8032,hdfs://nn2.com:8032,
+    webhdfs://nn3.com:50070</code>. The Spark application must have access to the namenodes listed 
+    and Kerberos must be properly configured to be able to access them (either in the same realm 
+    or in a trusted realm). Spark acquires security tokens for each of the namenodes so that
     the Spark application can access those remote HDFS clusters.
   </td>
 </tr>
@@ -306,12 +336,30 @@ If you need a reference to the proper location to put log files in the YARN so t
   </td>
 </tr>
 <tr>
+  <td><code>spark.yarn.am.attemptFailuresValidityInterval</code></td>
+  <td>(none)</td>
+  <td>
+  Defines the validity interval for AM failure tracking.
+  If the AM has been running for at least the defined interval, the AM failure count will be reset.
+  This feature is not enabled if not configured, and only supported in Hadoop 2.6+.
+  </td>
+</tr>
+<tr>
   <td><code>spark.yarn.submit.waitAppCompletion</code></td>
   <td><code>true</code></td>
   <td>
   In YARN cluster mode, controls whether the client waits to exit until the application completes.
   If set to <code>true</code>, the client process will stay alive reporting the application's status.
   Otherwise, the client process will exit after submission.
+  </td>
+</tr>
+<tr>
+  <td><code>spark.yarn.am.nodeLabelExpression</code></td>
+  <td>(none)</td>
+  <td>
+  A YARN node label expression that restricts the set of nodes AM will be scheduled on.
+  Only versions of YARN greater than or equal to 2.6 support node label expressions, so when
+  running against earlier versions, this property will be ignored.
   </td>
 </tr>
 <tr>
@@ -337,14 +385,14 @@ If you need a reference to the proper location to put log files in the YARN so t
   <td>
   The full path to the file that contains the keytab for the principal specified above.
   This keytab will be copied to the node running the YARN Application Master via the Secure Distributed Cache,
-  for renewing the login tickets and the delegation tokens periodically.
+  for renewing the login tickets and the delegation tokens periodically. (Works also with the "local" master)
   </td>
 </tr>
 <tr>
   <td><code>spark.yarn.principal</code></td>
   <td>(none)</td>
   <td>
-  Principal to be used to login to KDC, while running on secure HDFS.
+  Principal to be used to login to KDC, while running on secure HDFS. (Works also with the "local" master)
   </td>
 </tr>
 <tr>
