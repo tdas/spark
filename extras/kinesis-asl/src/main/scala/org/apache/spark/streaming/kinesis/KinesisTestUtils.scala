@@ -54,6 +54,8 @@ private[kinesis] class KinesisTestUtils extends Logging {
   @volatile
   private var _streamName: String = _
 
+  private val shadeIdToLatestSeqNum = mutable.HashMap[String, String]()
+
   protected lazy val kinesisClient = {
     val client = new AmazonKinesisClient(KinesisTestUtils.getAWSCredentials())
     client.setEndpoint(endpointUrl)
@@ -105,8 +107,13 @@ private[kinesis] class KinesisTestUtils extends Logging {
     val producer = getProducer(aggregate)
     val shardIdToSeqNumbers = producer.sendData(streamName, testData)
     logInfo(s"Pushed $testData:\n\t ${shardIdToSeqNumbers.mkString("\n\t")}")
+    shardIdToSeqNumbers.foreach { case (shardId, seq) =>
+      shadeIdToLatestSeqNum(shardId) = seq.last._2
+    }
     shardIdToSeqNumbers.toMap
   }
+
+  def getLatestSeqNumsOfShards(): Map[String, String] = shadeIdToLatestSeqNum.toMap
 
   /**
    * Expose a Python friendly API.

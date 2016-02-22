@@ -71,7 +71,7 @@ trait StreamTest extends QueryTest with Timeouts {
   }
 
   /** How long to wait for an active stream to catch up when checking a result. */
-  val streamingTimeout = 10.seconds
+  def streamingTimeout: Span = 10.seconds
 
   /** A trait for actions that can be performed while testing a streaming DataFrame. */
   trait StreamAction
@@ -380,10 +380,10 @@ trait StreamTest extends QueryTest with Timeouts {
         pos += 1
       }
     } catch {
-      case _: InterruptedException if streamDeathCause != null =>
-        failTest("Stream Thread Died")
-      case _: org.scalatest.exceptions.TestFailedDueToTimeoutException =>
-        failTest("Timed out waiting for stream")
+      case e: InterruptedException if streamDeathCause != null =>
+        failTest("Stream Thread Died", e)
+      case e: org.scalatest.exceptions.TestFailedDueToTimeoutException =>
+        failTest("Timed out waiting for stream", e)
     } finally {
       if (currentStream != null && currentStream.microBatchThread.isAlive) {
         currentStream.stop()

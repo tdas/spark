@@ -18,6 +18,7 @@
 package org.apache.spark.streaming.kinesis
 
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
+import org.scalatest.time.SpanSugar._
 
 import org.apache.spark.SparkEnv
 import org.apache.spark.sql.{AnalysisException, StreamTest}
@@ -25,9 +26,7 @@ import org.apache.spark.sql.execution.streaming.{Offset, Source, StreamingRelati
 import org.apache.spark.sql.test.SharedSQLContext
 import org.apache.spark.storage.StreamBlockId
 
-class KinesisSourceSuite extends StreamTest with SharedSQLContext with KinesisFunSuite {
-
-  import testImplicits._
+class KinesisSourceTest extends StreamTest with SharedSQLContext {
 
   case class AddKinesisData(
       testUtils: KPLBasedKinesisTestUtils,
@@ -35,17 +34,20 @@ class KinesisSourceSuite extends StreamTest with SharedSQLContext with KinesisFu
       data: Seq[Int]) extends AddData {
 
     override def addData(): Offset = {
-      val shardIdToSeqNums = testUtils.pushData(data, false).map { case (shardId, info) =>
-        (Shard(testUtils.streamName, shardId), info.last._2)
+      testUtils.pushData(data, false)
+      val shardIdToSeqNums = testUtils.getLatestSeqNumsOfShards().map { case (shardId, seqNum) =>
+        (Shard(testUtils.streamName, shardId), seqNum)
       }
-      assert(shardIdToSeqNums.size === testUtils.streamShardCount,
-        s"Data must be send to all ${testUtils.streamShardCount} " +
-          s"shards of stream ${testUtils.streamName}")
       KinesisSourceOffset(shardIdToSeqNums)
     }
 
     override def source: Source = kinesisSource
   }
+}
+
+class KinesisSourceSuite extends KinesisSourceTest with KinesisFunSuite {
+
+  import testImplicits._
 
   testIfEnabled("basic receiving") {
     var streamBlocksInLastBatch: Seq[StreamBlockId] = Seq.empty
@@ -141,5 +143,32 @@ class KinesisSourceSuite extends StreamTest with SharedSQLContext with KinesisFu
     }
     assert(e.getMessage === "org.apache.spark.streaming.kinesis.DefaultSource is " +
       "neither a RelationProvider nor a FSBasedRelationProvider.;")
+  }
+}
+
+class KinesisSourceStressTestSuite extends KinesisSourceTest with KinesisFunSuite {
+
+  import testImplicits._
+
+  override val streamingTimeout = 60.seconds
+
+  test("kinesis source stress test") {
+    val testUtils = new KPLBasedKinesisTestUtils
+    testUtils.createStream()
+    try {
+      val kinesisSource = new KinesisSource(
+        sqlContext,
+        testUtils.regionName,
+        testUtils.endpointUrl,
+        Set(testUtils.streamName),
+        InitialPositionInStream.TRIM_HORIZON)
+
+      val ds = kinesisSource.toDS[String]().map(_.toInt + 1)
+      runStressTest(ds, data => {
+        AddKinesisData(testUtils, kinesisSource, data)
+      })
+    } finally {
+      testUtils.deleteStream()
+    }
   }
 }

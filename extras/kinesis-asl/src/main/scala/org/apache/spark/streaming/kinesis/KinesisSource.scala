@@ -46,7 +46,7 @@ private[kinesis] case class KinesisSourceOffset(seqNums: Map[Shard, String])
         (this.seqNums.get(shard).map(BigInt(_)), that.seqNums.get(shard).map(BigInt(_))) match {
           case (Some(thisNum), Some(thatNum)) => thisNum.compare(thatNum)
           case (None, _) => -1   // new shard started by resharding
-          case (_, None) => -1   // old shard got eliminated by resharding
+          case (_, None) => 1   // old shard got eliminated by resharding
         }
       }
 
