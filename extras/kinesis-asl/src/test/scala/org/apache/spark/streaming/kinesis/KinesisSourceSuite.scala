@@ -23,7 +23,7 @@ import org.apache.spark.SparkEnv
 import org.apache.spark.sql.{AnalysisException, StreamTest}
 import org.apache.spark.sql.execution.streaming.{Offset, Source, StreamingRelation}
 import org.apache.spark.sql.test.SharedSQLContext
-import org.apache.spark.storage.StreamSourceBlockId
+import org.apache.spark.storage.StreamBlockId
 
 class KinesisSourceSuite extends StreamTest with SharedSQLContext with KinesisFunSuite {
 
@@ -48,14 +48,14 @@ class KinesisSourceSuite extends StreamTest with SharedSQLContext with KinesisFu
   }
 
   testIfEnabled("basic receiving") {
-    var streamBlocksInLastBatch: Seq[StreamSourceBlockId] = Seq.empty
+    var streamBlocksInLastBatch: Seq[StreamBlockId] = Seq.empty
 
     def assertStreamBlocks: Boolean = {
       // Assume the test runs in local mode and there is only one BlockManager.
       val streamBlocks =
-        SparkEnv.get.blockManager.getMatchingBlockIds(_.isInstanceOf[StreamSourceBlockId])
+        SparkEnv.get.blockManager.getMatchingBlockIds(_.isInstanceOf[StreamBlockId])
       val cleaned = streamBlocks.intersect(streamBlocksInLastBatch).isEmpty
-      streamBlocksInLastBatch = streamBlocks.map(_.asInstanceOf[StreamSourceBlockId])
+      streamBlocksInLastBatch = streamBlocks.map(_.asInstanceOf[StreamBlockId])
       cleaned
     }
 

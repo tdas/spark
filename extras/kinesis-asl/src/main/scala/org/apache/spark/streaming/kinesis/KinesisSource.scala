@@ -36,7 +36,7 @@ import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.execution.streaming.{Batch, Offset, Source}
 import org.apache.spark.sql.types.StructType
-import org.apache.spark.storage.{BlockId, StorageLevel, StreamSourceBlockId}
+import org.apache.spark.storage.{BlockId, StorageLevel, StreamBlockId}
 
 private[kinesis] case class Shard(streamName: String, shardId: String)
 
@@ -179,7 +179,7 @@ private[kinesis] object KinesisSource {
 
   private val nextId = new AtomicLong(0)
 
-  def nextBlockId: StreamSourceBlockId = StreamSourceBlockId("kinesis", nextId.getAndIncrement)
+  def nextBlockId: StreamBlockId = StreamBlockId(-1, nextId.getAndIncrement)
 }
 
 /**
