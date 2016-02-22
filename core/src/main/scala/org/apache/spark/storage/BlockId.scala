@@ -85,11 +85,6 @@ case class StreamBlockId(streamId: Int, uniqueId: Long) extends BlockId {
   override def name: String = "input-" + streamId + "-" + uniqueId
 }
 
-@DeveloperApi
-case class StreamSourceBlockId(source: String, uniqueId: Long) extends BlockId {
-  override def name: String = s"source-$source-$uniqueId"
-}
-
 /** Id associated with temporary local data managed as blocks. Not serializable. */
 private[spark] case class TempLocalBlockId(id: UUID) extends BlockId {
   override def name: String = "temp_local_" + id
@@ -114,7 +109,6 @@ object BlockId {
   val BROADCAST = "broadcast_([0-9]+)([_A-Za-z0-9]*)".r
   val TASKRESULT = "taskresult_([0-9]+)".r
   val STREAM = "input-([0-9]+)-([0-9]+)".r
-  val STREAM_SOURCE = "source-([_A-Za-z0-9]+)-([0-9]+)".r
   val TEST = "test_(.*)".r
 
   /** Converts a BlockId "name" String back into a BlockId. */
@@ -133,8 +127,6 @@ object BlockId {
       TaskResultBlockId(taskId.toLong)
     case STREAM(streamId, uniqueId) =>
       StreamBlockId(streamId.toInt, uniqueId.toLong)
-    case STREAM_SOURCE(source, uniqueId) =>
-      StreamSourceBlockId(source, uniqueId.toLong)
     case TEST(value) =>
       TestBlockId(value)
     case _ =>

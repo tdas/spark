@@ -163,7 +163,6 @@ class JsonProtocolSuite extends SparkFunSuite {
     testBlockId(BroadcastBlockId(1L, "insert_words_of_wisdom_here"))
     testBlockId(TaskResultBlockId(1L))
     testBlockId(StreamBlockId(1, 2L))
-    testBlockId(StreamSourceBlockId("test", 2L))
   }
 
   /* ============================== *
