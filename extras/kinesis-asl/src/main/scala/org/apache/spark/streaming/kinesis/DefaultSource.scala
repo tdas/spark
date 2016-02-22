@@ -36,20 +36,32 @@ class DefaultSource extends StreamSourceProvider with DataSourceRegister {
       parameters: Map[String, String]): Source = {
     val caseInsensitiveOptions = new CaseInsensitiveMap(parameters)
     val regionName = caseInsensitiveOptions.getOrElse("regionName", {
-      throw new IllegalArgumentException("regionName is not specified")
+      throw new IllegalArgumentException("Option 'regionName' is not specified")
     })
     val endpointUrl = caseInsensitiveOptions.getOrElse("endpointUrl", {
-      throw new IllegalArgumentException("endpointUrl is not specified")
+      throw new IllegalArgumentException("Option 'endpointUrl' is not specified")
     })
     val streamNames = caseInsensitiveOptions.getOrElse("streamNames", {
-      throw new IllegalArgumentException("streamNames is not specified")
+      throw new IllegalArgumentException("Option 'streamNames' is not specified")
     }).split(',').toSet
     val initialPosInStream =
       caseInsensitiveOptions.getOrElse("initialPosInStream", "LATEST") match {
         case "LATEST" => InitialPositionInStream.LATEST
         case "TRIM_HORIZON" => InitialPositionInStream.TRIM_HORIZON
-        case pos => throw new IllegalArgumentException(s"unknown initialPosInStream: $pos")
+        case pos =>
+          throw new IllegalArgumentException(s"Unknown value of option initialPosInStream: $pos")
       }
+
+    if ((caseInsensitiveOptions.get("AWS_ACCESS_KEY_ID").nonEmpty
+      && caseInsensitiveOptions.get("AWS_SECRET_ACCESS_KEY").isEmpty)) {
+      throw new IllegalArgumentException(
+        s"AWS_ACCESS_KEY_ID is set but AWS_SECRET_ACCESS_KEY is not found")
+    }
+    if ((caseInsensitiveOptions.get("AWS_ACCESS_KEY_ID").isEmpty
+      && caseInsensitiveOptions.get("AWS_SECRET_ACCESS_KEY").nonEmpty)) {
+      throw new IllegalArgumentException(
+        s"AWS_SECRET_ACCESS_KEY is set but AWS_ACCESS_KEY_ID is not found")
+    }
     val awsCredentialsOption =
       for (accessKeyId <- caseInsensitiveOptions.get("AWS_ACCESS_KEY_ID");
            secretKey <- caseInsensitiveOptions.get("AWS_SECRET_ACCESS_KEY"))

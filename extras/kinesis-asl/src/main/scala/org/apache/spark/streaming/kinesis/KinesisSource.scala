@@ -60,7 +60,7 @@ private[kinesis] case class KinesisSourceOffset(seqNums: Map[Shard, String])
         case 1 => nonZeroSigns.head // if there are only (0s and 1s) or (0s and -1s)
         case _ => // there are both 1s and -1s
           throw new IllegalArgumentException(
-            s"Invalid comparison between non-linear histories: $this <=> $that")
+            s"Invalid comparison between KinesisSource offsets: \n\t this: $this\n\t that: $that")
       }
 
     case _ =>
