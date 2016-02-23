@@ -17,11 +17,10 @@
 
 package org.apache.spark.streaming.kinesis
 
-import com.amazonaws.ClientConfiguration
+import com.amazonaws.AmazonClientException
 import com.amazonaws.auth.DefaultAWSCredentialsProviderChain
 import com.amazonaws.regions.RegionUtils
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
-import com.amazonaws.util.{AwsHostNameUtils, HttpUtils}
 
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.execution.datasources.CaseInsensitiveMap
@@ -40,12 +39,15 @@ class DefaultSource extends StreamSourceProvider with DataSourceRegister {
       parameters: Map[String, String]): Source = {
     val caseInsensitiveOptions = new CaseInsensitiveMap(parameters)
 
-    val streams = caseInsensitiveOptions.getOrElse("streams", {
-      throw new IllegalArgumentException("Option 'streams' is not specified")
+    val streams = caseInsensitiveOptions.getOrElse("stream", {
+      throw new IllegalArgumentException(
+        "Option 'stream' must be specified. Examples: " +
+          """option("stream", "stream1"), option("stream", "stream1,stream2")""")
     }).split(",", -1).toSet
+
     if (streams.isEmpty || streams.exists(_.isEmpty)) {
       throw new IllegalArgumentException(
-        "Option 'streams' is invalid. Please use comma separated string (e.g., 'stream1,stream2')")
+        "Option 'stream' is invalid, as stream names cannot be empty.")
     }
 
     val regionOption = caseInsensitiveOptions.get("region")
@@ -62,15 +64,20 @@ class DefaultSource extends StreamSourceProvider with DataSourceRegister {
       case (None, Some(_endpoint)) =>
         (RegionUtils.getRegionByEndpoint(_endpoint).getName, _endpoint)
       case (None, None) =>
-        throw new IllegalArgumentException("Either 'region' or 'endpoint' should be specified")
+        throw new IllegalArgumentException(
+          "Either option 'region' or option 'endpoint' must be specified. Examples: " +
+            """option("region", "us-west-2"), """ +
+            """option("endpoint", "https://kinesis.us-west-2.amazonaws.com")""")
     }
 
     val initialPosInStream =
-      caseInsensitiveOptions.getOrElse("initialPosInStream", "LATEST") match {
-        case "LATEST" => InitialPositionInStream.LATEST
-        case "TRIM_HORIZON" => InitialPositionInStream.TRIM_HORIZON
+      caseInsensitiveOptions.getOrElse("position", InitialPositionInStream.LATEST.name) match {
+        case pos if pos.toUpperCase == InitialPositionInStream.LATEST.name =>
+          InitialPositionInStream.LATEST
+        case pos if pos.toUpperCase == InitialPositionInStream.TRIM_HORIZON.name =>
+          InitialPositionInStream.TRIM_HORIZON
         case pos =>
-          throw new IllegalArgumentException(s"Unknown value of option initialPosInStream: $pos")
+          throw new IllegalArgumentException(s"Unknown value of option 'position': $pos")
       }
 
     val accessKeyOption = caseInsensitiveOptions.get("accessKey")
@@ -85,7 +92,16 @@ class DefaultSource extends StreamSourceProvider with DataSourceRegister {
         throw new IllegalArgumentException(
           s"'secretKey' is set but 'accessKey' is not found")
       case (None, None) =>
-        SerializableAWSCredentials(new DefaultAWSCredentialsProviderChain().getCredentials())
+        try {
+          SerializableAWSCredentials(new DefaultAWSCredentialsProviderChain().getCredentials())
+        } catch {
+          case _: AmazonClientException =>
+            throw new IllegalArgumentException(
+              "No credential found using default AWS provider chain. Specify credentials using " +
+                "options 'accessKey' and 'secretKey'. Examples: " +
+                """option("accessKey", "your-aws-access-key"), """ +
+                """option("secretKey", "your-aws-secret-key")""")
+        }
     }
 
     new KinesisSource(

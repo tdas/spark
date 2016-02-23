@@ -23,7 +23,6 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 import com.amazonaws.AbortedException
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain
 import com.amazonaws.services.kinesis.AmazonKinesisClient
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
 
@@ -163,12 +162,7 @@ private[kinesis] class KinesisSource(
     }
   }
 
-  override def toString: String = s"KinesisSource[" +
-    s"regionName=$regionName, " +
-    s"endpointUrl=$endpointUrl, " +
-    s"streamNames=${streamNames.mkString(",")}, " +
-    s"initialPosInStream=$initialPosInStream" +
-    s"]"
+  override def toString: String = s"KinesisSource[streamNames=${streamNames.mkString(",")}]"
 }
 
 private[kinesis] object KinesisSource {

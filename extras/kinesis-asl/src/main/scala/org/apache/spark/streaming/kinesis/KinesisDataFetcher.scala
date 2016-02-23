@@ -45,12 +45,26 @@ private[kinesis] class KinesisDataFetcher(
    */
   @transient private lazy val client = new AmazonKinesisClient(credentials)
 
+  /**
+   * Launch a Spark job to fetch latest data from the specified `shard`s. This method will try to
+   * fetch arriving data in `readTimeoutMs` milliseconds so as to get the latest sequence numbers.
+   * New data will be pushed to the block manager to avoid fetching them again.
+   *
+   * This is a workaround since Kinesis doesn't provider an API to fetch the latest sequence number.
+   */
   def fetch(sc: SparkContext): Array[(BlockId, SequenceNumberRange)] = {
     sc.makeRDD(fromSeqNums, fromSeqNums.size).map {
       case (shard, fromSeqNum) => fetchPartition(shard, fromSeqNum)
     }.collect().flatten
   }
 
+  /**
+   * Fetch latest data from the specified `shard` since `fromSeqNum`. This method will try to fetch
+   * arriving data in `readTimeoutMs` milliseconds so as to get the latest sequence number. New data
+   * will be pushed to the block manager to avoid fetching them again.
+   *
+   * This is a workaround since Kinesis doesn't provider an API to fetch the latest sequence number.
+   */
   private def fetchPartition(
       shard: Shard,
       fromSeqNum: Option[String]): Option[(BlockId, SequenceNumberRange)] = {

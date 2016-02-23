@@ -102,8 +102,8 @@ class KinesisSourceSuite extends KinesisSourceTest with KinesisFunSuite {
       val df = sqlContext.read
         .option("region", testUtils.regionName)
         .option("endpoint", testUtils.endpointUrl)
-        .option("streams", testUtils.streamName)
-        .option("initialPosInStream", InitialPositionInStream.TRIM_HORIZON.name())
+        .option("stream", testUtils.streamName)
+        .option("position", InitialPositionInStream.TRIM_HORIZON.name())
         .kinesis().stream()
 
       val sources = df.queryExecution.analyzed.collect {
@@ -111,57 +111,58 @@ class KinesisSourceSuite extends KinesisSourceTest with KinesisFunSuite {
         }
       assert(sources.size === 1)
 
-      // streams
-      assertExceptionAndMessage[IllegalArgumentException]("Option 'streams' is not specified") {
+      // stream
+      assertExceptionAndMessage[IllegalArgumentException](
+        "Option 'stream' must be specified. Examples: " +
+          """option("stream", "stream1"), option("stream", "stream1,stream2")""") {
         sqlContext.read.kinesis().stream()
       }
       assertExceptionAndMessage[IllegalArgumentException](
-        "Option 'streams' is invalid. Please use comma separated string (e.g., 'stream1,stream2')"
-      ) {
-        sqlContext.read.option("streams", "").kinesis().stream()
+        "Option 'stream' is invalid, as stream names cannot be empty.") {
+        sqlContext.read.option("stream", "").kinesis().stream()
       }
       assertExceptionAndMessage[IllegalArgumentException](
-        "Option 'streams' is invalid. Please use comma separated string (e.g., 'stream1,stream2')"
-      ) {
-        sqlContext.read.option("streams", "a,").kinesis().stream()
+        "Option 'stream' is invalid, as stream names cannot be empty.") {
+        sqlContext.read.option("stream", "a,").kinesis().stream()
       }
       assertExceptionAndMessage[IllegalArgumentException](
-        "Option 'streams' is invalid. Please use comma separated string (e.g., 'stream1,stream2')"
-      ) {
-        sqlContext.read.option("streams", ",a").kinesis().stream()
+        "Option 'stream' is invalid, as stream names cannot be empty.") {
+        sqlContext.read.option("stream", ",a").kinesis().stream()
       }
 
       // region and endpoint
       // Setting either endpoint or region is fine
       sqlContext.read
-        .option("streams", testUtils.streamName)
+        .option("stream", testUtils.streamName)
         .option("endpoint", testUtils.endpointUrl)
         .kinesis().stream()
       sqlContext.read
-        .option("streams", testUtils.streamName)
+        .option("stream", testUtils.streamName)
         .option("region", testUtils.regionName)
         .kinesis().stream()
 
       assertExceptionAndMessage[IllegalArgumentException](
-        "Either 'region' or 'endpoint' should be specified") {
-        sqlContext.read.option("streams", testUtils.streamName).kinesis().stream()
+        "Either option 'region' or option 'endpoint' must be specified. Examples: " +
+          """option("region", "us-west-2"), """ +
+          """option("endpoint", "https://kinesis.us-west-2.amazonaws.com")""") {
+        sqlContext.read.option("stream", testUtils.streamName).kinesis().stream()
       }
       assertExceptionAndMessage[IllegalArgumentException](
         s"'region'(invalid-region) doesn't match to 'endpoint'(${testUtils.endpointUrl})") {
         sqlContext.read
-          .option("streams", testUtils.streamName)
+          .option("stream", testUtils.streamName)
           .option("region", "invalid-region")
           .option("endpoint", testUtils.endpointUrl)
           .kinesis().stream()
       }
 
-      // initialPosInStream
+      // position
       assertExceptionAndMessage[IllegalArgumentException](
-        "Unknown value of option initialPosInStream: invalid") {
+        "Unknown value of option 'position': invalid") {
         sqlContext.read
-          .option("streams", testUtils.streamName)
+          .option("stream", testUtils.streamName)
           .option("endpoint", testUtils.endpointUrl)
-          .option("initialPosInStream", "invalid")
+          .option("position", "invalid")
           .kinesis().stream()
       }
 
@@ -169,18 +170,18 @@ class KinesisSourceSuite extends KinesisSourceTest with KinesisFunSuite {
       assertExceptionAndMessage[IllegalArgumentException](
         "'accessKey' is set but 'secretKey' is not found") {
         sqlContext.read
-          .option("streams", testUtils.streamName)
+          .option("stream", testUtils.streamName)
           .option("endpoint", testUtils.endpointUrl)
-          .option("initialPosInStream", InitialPositionInStream.TRIM_HORIZON.name())
+          .option("position", InitialPositionInStream.TRIM_HORIZON.name())
           .option("accessKey", "test")
           .kinesis().stream()
       }
       assertExceptionAndMessage[IllegalArgumentException](
         "'secretKey' is set but 'accessKey' is not found") {
         sqlContext.read
-          .option("streams", testUtils.streamName)
+          .option("stream", testUtils.streamName)
           .option("endpoint", testUtils.endpointUrl)
-          .option("initialPosInStream", InitialPositionInStream.TRIM_HORIZON.name())
+          .option("position", InitialPositionInStream.TRIM_HORIZON.name())
           .option("secretKey", "test")
           .kinesis().stream()
       }
@@ -210,7 +211,7 @@ class KinesisSourceStressTestSuite extends KinesisSourceTest with KinesisFunSuit
 
   import testImplicits._
 
-  test("kinesis source stress test") {
+  testIfEnabled("kinesis source stress test") {
     val testUtils = new KPLBasedKinesisTestUtils
     testUtils.createStream()
     try {
