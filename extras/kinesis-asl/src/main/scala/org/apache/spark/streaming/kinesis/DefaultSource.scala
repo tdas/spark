@@ -17,7 +17,11 @@
 
 package org.apache.spark.streaming.kinesis
 
+import com.amazonaws.ClientConfiguration
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain
+import com.amazonaws.regions.RegionUtils
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
+import com.amazonaws.util.{AwsHostNameUtils, HttpUtils}
 
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.execution.datasources.CaseInsensitiveMap
@@ -35,15 +39,32 @@ class DefaultSource extends StreamSourceProvider with DataSourceRegister {
       providerName: String,
       parameters: Map[String, String]): Source = {
     val caseInsensitiveOptions = new CaseInsensitiveMap(parameters)
-    val regionName = caseInsensitiveOptions.getOrElse("regionName", {
-      throw new IllegalArgumentException("Option 'regionName' is not specified")
-    })
-    val endpointUrl = caseInsensitiveOptions.getOrElse("endpointUrl", {
-      throw new IllegalArgumentException("Option 'endpointUrl' is not specified")
-    })
-    val streamNames = caseInsensitiveOptions.getOrElse("streamNames", {
-      throw new IllegalArgumentException("Option 'streamNames' is not specified")
-    }).split(',').toSet
+
+    val streams = caseInsensitiveOptions.getOrElse("streams", {
+      throw new IllegalArgumentException("Option 'streams' is not specified")
+    }).split(",", -1).toSet
+    if (streams.isEmpty || streams.exists(_.isEmpty)) {
+      throw new IllegalArgumentException(
+        "Option 'streams' is invalid. Please use comma separated string (e.g., 'stream1,stream2')")
+    }
+
+    val regionOption = caseInsensitiveOptions.get("region")
+    val endpointOption = caseInsensitiveOptions.get("endpoint")
+    val (region, endpoint) = (regionOption, endpointOption) match {
+      case (Some(_region), Some(_endpoint)) =>
+        if (RegionUtils.getRegionByEndpoint(_endpoint).getName != _region) {
+          throw new IllegalArgumentException(
+            s"'region'(${_region}) doesn't match to 'endpoint'(${_endpoint})")
+        }
+        (_region, _endpoint)
+      case (Some(_region), None) =>
+        (_region, RegionUtils.getRegion(_region).getServiceEndpoint("kinesis"))
+      case (None, Some(_endpoint)) =>
+        (RegionUtils.getRegionByEndpoint(_endpoint).getName, _endpoint)
+      case (None, None) =>
+        throw new IllegalArgumentException("Either 'region' or 'endpoint' should be specified")
+    }
+
     val initialPosInStream =
       caseInsensitiveOptions.getOrElse("initialPosInStream", "LATEST") match {
         case "LATEST" => InitialPositionInStream.LATEST
@@ -52,28 +73,27 @@ class DefaultSource extends StreamSourceProvider with DataSourceRegister {
           throw new IllegalArgumentException(s"Unknown value of option initialPosInStream: $pos")
       }
 
-    if ((caseInsensitiveOptions.get("AWS_ACCESS_KEY_ID").nonEmpty
-      && caseInsensitiveOptions.get("AWS_SECRET_ACCESS_KEY").isEmpty)) {
-      throw new IllegalArgumentException(
-        s"AWS_ACCESS_KEY_ID is set but AWS_SECRET_ACCESS_KEY is not found")
+    val accessKeyOption = caseInsensitiveOptions.get("accessKey")
+    val secretKeyOption = caseInsensitiveOptions.get("secretKey")
+    val credentials = (accessKeyOption, secretKeyOption) match {
+      case (Some(accessKey), Some(secretKey)) =>
+        new SerializableAWSCredentials(accessKey, secretKey)
+      case (Some(accessKey), None) =>
+        throw new IllegalArgumentException(
+          s"'accessKey' is set but 'secretKey' is not found")
+      case (None, Some(secretKey)) =>
+        throw new IllegalArgumentException(
+          s"'secretKey' is set but 'accessKey' is not found")
+      case (None, None) =>
+        SerializableAWSCredentials(new DefaultAWSCredentialsProviderChain().getCredentials())
     }
-    if ((caseInsensitiveOptions.get("AWS_ACCESS_KEY_ID").isEmpty
-      && caseInsensitiveOptions.get("AWS_SECRET_ACCESS_KEY").nonEmpty)) {
-      throw new IllegalArgumentException(
-        s"AWS_SECRET_ACCESS_KEY is set but AWS_ACCESS_KEY_ID is not found")
-    }
-    val awsCredentialsOption =
-      for (accessKeyId <- caseInsensitiveOptions.get("AWS_ACCESS_KEY_ID");
-           secretKey <- caseInsensitiveOptions.get("AWS_SECRET_ACCESS_KEY"))
-        yield new SerializableAWSCredentials(accessKeyId, secretKey)
 
     new KinesisSource(
       sqlContext,
-      regionName,
-      endpointUrl,
-      streamNames,
+      region,
+      endpoint,
+      streams,
       initialPosInStream,
-      awsCredentialsOption
-    )
+      credentials)
   }
 }

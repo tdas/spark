@@ -33,14 +33,16 @@ import org.apache.spark.storage.{BlockId, StorageLevel}
  * However, this class runs in the driver so could be a bottleneck.
  */
 private[kinesis] class KinesisDataFetcher(
-  credentials: SerializableAWSCredentials,
-  endpointUrl: String,
-  regionName: String,
-  fromSeqNums: Seq[(Shard, Option[String])],
-  initialPositionInStream: InitialPositionInStream,
-  readTimeoutMs: Long = 2000L
+    credentials: SerializableAWSCredentials,
+    endpointUrl: String,
+    fromSeqNums: Seq[(Shard, Option[String])],
+    initialPositionInStream: InitialPositionInStream,
+    readTimeoutMs: Long = 2000L
 ) extends Serializable with Logging {
 
+  /**
+   * Use lazy because the client needs to be created in executors
+   */
   @transient private lazy val client = new AmazonKinesisClient(credentials)
 
   def fetch(sc: SparkContext): Array[(BlockId, SequenceNumberRange)] = {
@@ -50,9 +52,9 @@ private[kinesis] class KinesisDataFetcher(
   }
 
   private def fetchPartition(
-    shard: Shard,
-    fromSeqNum: Option[String]): Option[(BlockId, SequenceNumberRange)] = {
-    client.setEndpoint(endpointUrl, "kinesis", regionName)
+      shard: Shard,
+      fromSeqNum: Option[String]): Option[(BlockId, SequenceNumberRange)] = {
+    client.setEndpoint(endpointUrl)
 
     val endTime = System.currentTimeMillis + readTimeoutMs
     def timeLeft = math.max(endTime - System.currentTimeMillis, 0)
@@ -112,8 +114,7 @@ private[kinesis] class KinesisDataFetcher(
    * Get the records starting from using a Kinesis shard iterator (which is a progress handle
    * to get records from Kinesis), and get the next shard iterator for next consumption.
    */
-  private def getRecordsAndNextKinesisIterator(
-    shardIterator: String): (Seq[Record], String) = {
+  private def getRecordsAndNextKinesisIterator(shardIterator: String): (Seq[Record], String) = {
     val getRecordsRequest = new GetRecordsRequest().withShardIterator(shardIterator)
     getRecordsRequest.setRequestCredentials(credentials)
     val getRecordsResult = client.getRecords(getRecordsRequest)
@@ -130,9 +131,9 @@ private[kinesis] class KinesisDataFetcher(
    * sequence number.
    */
   private def getKinesisIterator(
-    shard: Shard,
-    iteratorType: ShardIteratorType,
-    sequenceNumber: String): String = {
+      shard: Shard,
+      iteratorType: ShardIteratorType,
+      sequenceNumber: String): String = {
     val getShardIteratorRequest = new GetShardIteratorRequest()
       .withStreamName(shard.streamName)
       .withShardId(shard.shardId)

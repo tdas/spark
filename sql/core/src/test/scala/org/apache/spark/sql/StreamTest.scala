@@ -71,7 +71,7 @@ trait StreamTest extends QueryTest with Timeouts {
   }
 
   /** How long to wait for an active stream to catch up when checking a result. */
-  def streamingTimeout: Span = 10.seconds
+  val streamingTimeout = 10.seconds
 
   /** A trait for actions that can be performed while testing a streaming DataFrame. */
   trait StreamAction

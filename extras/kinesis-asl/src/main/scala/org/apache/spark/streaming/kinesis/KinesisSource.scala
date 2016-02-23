@@ -69,8 +69,8 @@ private[kinesis] class KinesisSource(
     regionName: String,
     endpointUrl: String,
     streamNames: Set[String],
-    initialPosInStream: InitialPositionInStream = InitialPositionInStream.LATEST,
-    awsCredentialsOption: Option[SerializableAWSCredentials] = None) extends Source {
+    initialPosInStream: InitialPositionInStream,
+    awsCredentials: SerializableAWSCredentials) extends Source {
 
   // How long we should wait before calling `fetchShards()`. Because DescribeStream has a limit of
   // 10 transactions per second per account, we should not request too frequently.
@@ -81,20 +81,14 @@ private[kinesis] class KinesisSource(
 
   implicit private val encoder = ExpressionEncoder[Array[Byte]]
 
-  private val credentials = SerializableAWSCredentials(
-    awsCredentialsOption.getOrElse(new DefaultAWSCredentialsProviderChain().getCredentials())
-  )
-
-  private val client = new AmazonKinesisClient(credentials)
-  client.setEndpoint(endpointUrl, "kinesis", regionName)
+  private val client = new AmazonKinesisClient(awsCredentials)
+  client.setEndpoint(endpointUrl)
 
   private var cachedBlocks = new mutable.HashSet[BlockId]
 
   override val schema: StructType = encoder.schema
 
   override def getNextBatch(start: Option[Offset]): Option[Batch] = {
-    val startOffset = start.map(_.asInstanceOf[KinesisSourceOffset])
-
     val now = System.currentTimeMillis()
     if (now - lastFetchShardsTimeMS < FETCH_SHARDS_INTERVAL_MS) {
       // Because DescribeStream has a limit of 10 transactions per second per account, we should not
@@ -102,18 +96,17 @@ private[kinesis] class KinesisSource(
       return None
     }
     lastFetchShardsTimeMS = now
+
+    val startOffset = start.map(_.asInstanceOf[KinesisSourceOffset])
     val shards = fetchShards()
 
     // Get the starting seq number of each shard if available
     val fromSeqNums = shards.map { shard => shard -> startOffset.flatMap(_.seqNums.get(shard)) }
 
     /** Prefetch Kinesis data from the starting seq nums */
-    val prefetchedData = new KinesisDataFetcher(
-      credentials,
-      endpointUrl,
-      regionName,
-      fromSeqNums,
-      initialPosInStream).fetch(sqlContext.sparkContext)
+    val prefetchedData =
+      new KinesisDataFetcher(awsCredentials, endpointUrl, fromSeqNums, initialPosInStream)
+        .fetch(sqlContext.sparkContext)
 
     if (prefetchedData.nonEmpty) {
       val prefetechedRanges = prefetchedData.map(_._2)
@@ -169,6 +162,13 @@ private[kinesis] class KinesisSource(
         throw e1
     }
   }
+
+  override def toString: String = s"KinesisSource[" +
+    s"regionName=$regionName, " +
+    s"endpointUrl=$endpointUrl, " +
+    s"streamNames=${streamNames.mkString(",")}, " +
+    s"initialPosInStream=$initialPosInStream" +
+    s"]"
 }
 
 private[kinesis] object KinesisSource {
