@@ -37,8 +37,7 @@ private[kinesis] class KinesisDataFetcher(
     endpointUrl: String,
     fromSeqNums: Seq[(Shard, Option[String], BlockId)],
     initialPositionInStream: InitialPositionInStream,
-    readTimeoutMs: Long = 2000L
-) extends Serializable with Logging {
+    readTimeoutMs: Long = 2000L) extends Serializable with Logging {
 
   /**
    * Use lazy because the client needs to be created in executors
