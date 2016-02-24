@@ -102,11 +102,19 @@ private[kinesis] class KinesisSource(
     // Get the starting seq number of each shard if available
     val fromSeqNums = shards.map { shard => shard -> startOffset.flatMap(_.seqNums.get(shard)) }
 
-    /** Prefetch Kinesis data from the starting seq nums */
+    // Assign a unique block id for each shard
+    val fromSeqNumsWithBlockId = fromSeqNums.map { case (shard, seqNum) =>
+      val uniqueBlockId = KinesisSource.nextBlockId
+      (shard, seqNum, uniqueBlockId)
+    }
+
+    // Prefetch Kinesis data from the starting seq nums
     val prefetchedData =
-      new KinesisDataFetcher(awsCredentials, endpointUrl, fromSeqNums.map { case (shard, seqNum) =>
-          (shard, seqNum, KinesisSource.nextBlockId)
-        }, initialPosInStream).fetch(sqlContext.sparkContext)
+      new KinesisDataFetcher(
+        awsCredentials,
+        endpointUrl,
+        fromSeqNumsWithBlockId,
+        initialPosInStream).fetch(sqlContext.sparkContext)
 
     if (prefetchedData.nonEmpty) {
       val prefetechedRanges = prefetchedData.map(_._2)
