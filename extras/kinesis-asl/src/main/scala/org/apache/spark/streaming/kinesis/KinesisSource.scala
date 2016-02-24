@@ -16,23 +16,22 @@
  */
 package org.apache.spark.streaming.kinesis
 
-import scala.collection.JavaConverters._
-import scala.collection.mutable.ArrayBuffer
-import scala.util.Random
-import scala.util.control.NonFatal
+import java.util.concurrent.atomic.AtomicLong
 
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain
+import scala.collection.JavaConverters._
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
+
+import com.amazonaws.AbortedException
 import com.amazonaws.services.kinesis.AmazonKinesisClient
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
-import com.amazonaws.services.kinesis.clientlibrary.types.UserRecord
-import com.amazonaws.services.kinesis.model._
 
 import org.apache.spark._
+import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.execution.streaming.{Batch, Offset, Source, StreamingRelation}
+import org.apache.spark.sql.execution.streaming.{Batch, Offset, Source}
 import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.{DataFrame, Dataset, SQLContext}
-import org.apache.spark.storage.{BlockId, StorageLevel, StreamBlockId}
+import org.apache.spark.storage.{BlockId, StreamBlockId}
 
 private[kinesis] case class Shard(streamName: String, shardId: String)
 
@@ -40,14 +39,13 @@ private[kinesis] case class KinesisSourceOffset(seqNums: Map[Shard, String])
   extends Offset {
 
   override def compareTo(otherOffset: Offset): Int = otherOffset match {
-
     case that: KinesisSourceOffset =>
       val allShards = this.seqNums.keySet ++ that.seqNums.keySet
       val comparisons = allShards.map { shard =>
         (this.seqNums.get(shard).map(BigInt(_)), that.seqNums.get(shard).map(BigInt(_))) match {
           case (Some(thisNum), Some(thatNum)) => thisNum.compare(thatNum)
           case (None, _) => -1   // new shard started by resharding
-          case (_, None) => -1   // old shard got eliminated by resharding
+          case (_, None) => 1   // old shard got eliminated by resharding
         }
       }
 
@@ -57,7 +55,7 @@ private[kinesis] case class KinesisSourceOffset(seqNums: Map[Shard, String])
         case 1 => nonZeroSigns.head // if there are only (0s and 1s) or (0s and -1s)
         case _ => // there are both 1s and -1s
           throw new IllegalArgumentException(
-            s"Invalid comparison between non-linear histories: $this <=> $that")
+            s"Invalid comparison between KinesisSource offsets: \n\t this: $this\n\t that: $that")
       }
 
     case _ =>
@@ -65,50 +63,58 @@ private[kinesis] case class KinesisSourceOffset(seqNums: Map[Shard, String])
   }
 }
 
-
-private[kinesis] object KinesisSourceOffset {
-  def fromOffset(offset: Offset): KinesisSourceOffset = {
-    offset match {
-      case o: KinesisSourceOffset => o
-      case _ =>
-        throw new IllegalArgumentException(
-          s"Invalid conversion from offset of ${offset.getClass} to $getClass")
-    }
-  }
-}
-
-
-private[kinesis] case class KinesisSource(
+private[kinesis] class KinesisSource(
     sqlContext: SQLContext,
     regionName: String,
     endpointUrl: String,
     streamNames: Set[String],
-    initialPosInStream: InitialPositionInStream = InitialPositionInStream.LATEST,
-    awsCredentialsOption: Option[SerializableAWSCredentials] = None) extends Source {
+    initialPosInStream: InitialPositionInStream,
+    awsCredentials: SerializableAWSCredentials) extends Source {
+
+  // How long we should wait before calling `fetchShards()`. Because DescribeStream has a limit of
+  // 10 transactions per second per account, we should not request too frequently.
+  private val FETCH_SHARDS_INTERVAL_MS = 200L
+
+  // The last time `fetchShards()` is called.
+  private var lastFetchShardsTimeMS = 0L
 
   implicit private val encoder = ExpressionEncoder[Array[Byte]]
-  private val logicalPlan = StreamingRelation(this)
 
-  @transient val credentials = SerializableAWSCredentials(
-    awsCredentialsOption.getOrElse(new DefaultAWSCredentialsProviderChain().getCredentials())
-  )
+  private val client = new AmazonKinesisClient(awsCredentials)
+  client.setEndpoint(endpointUrl)
 
-  @transient private val client = new AmazonKinesisClient(credentials)
-  client.setEndpoint(endpointUrl, "kinesis", regionName)
+  private var cachedBlocks = new mutable.HashSet[BlockId]
 
-  override def schema: StructType = encoder.schema
+  override val schema: StructType = encoder.schema
 
   override def getNextBatch(start: Option[Offset]): Option[Batch] = {
-    val startOffset = start.map(KinesisSourceOffset.fromOffset)
+    val now = System.currentTimeMillis()
+    if (now - lastFetchShardsTimeMS < FETCH_SHARDS_INTERVAL_MS) {
+      // Because DescribeStream has a limit of 10 transactions per second per account, we should not
+      // request too frequently.
+      return None
+    }
+    lastFetchShardsTimeMS = now
 
+    val startOffset = start.map(_.asInstanceOf[KinesisSourceOffset])
     val shards = fetchShards()
 
     // Get the starting seq number of each shard if available
     val fromSeqNums = shards.map { shard => shard -> startOffset.flatMap(_.seqNums.get(shard)) }
 
-    /** Prefetch Kinesis data from the starting seq nums */
-    val prefetchedData = new KinesisDataFetcher(
-      sqlContext, credentials, endpointUrl, regionName, fromSeqNums, initialPosInStream).fetch()
+    // Assign a unique block id for each shard
+    val fromSeqNumsWithBlockId = fromSeqNums.map { case (shard, seqNum) =>
+      val uniqueBlockId = KinesisSource.nextBlockId
+      (shard, seqNum, uniqueBlockId)
+    }
+
+    // Prefetch Kinesis data from the starting seq nums
+    val prefetchedData =
+      new KinesisDataFetcher(
+        awsCredentials,
+        endpointUrl,
+        fromSeqNumsWithBlockId,
+        initialPosInStream).fetch(sqlContext.sparkContext)
 
     if (prefetchedData.nonEmpty) {
       val prefetechedRanges = prefetchedData.map(_._2)
@@ -125,189 +131,52 @@ private[kinesis] case class KinesisSource(
 
       val rdd = new KinesisBackedBlockRDD[Array[Byte]](sqlContext.sparkContext, regionName,
         endpointUrl, prefetchedBlockIds, prefetechedRanges.map(SequenceNumberRanges.apply))
+
+      dropOldBlocks()
+      cachedBlocks ++= prefetchedBlockIds
+
       Some(new Batch(new KinesisSourceOffset(endOffset), sqlContext.createDataset(rdd).toDF))
     } else {
       None
     }
   }
 
-  def toDS(): Dataset[Array[Byte]] = {
-    toDF.as[Array[Byte]]
-  }
-
-  def toDF(): DataFrame = {
-    new DataFrame(sqlContext, logicalPlan)
+  private def dropOldBlocks(): Unit = {
+    val droppedBlocks = ArrayBuffer[BlockId]()
+    try {
+      for (blockId <- cachedBlocks) {
+        SparkEnv.get.blockManager.removeBlock(blockId)
+        droppedBlocks += blockId
+      }
+    } finally {
+      cachedBlocks --= droppedBlocks
+    }
   }
 
   private def fetchShards(): Seq[Shard] = {
-    streamNames.toSeq.flatMap { streamName =>
-      val desc = client.describeStream(streamName)
-      desc.getStreamDescription.getShards.asScala.map { s =>
-        Shard(streamName, s.getShardId)
-      }
-    }
-  }
-}
-
-
-private[kinesis] class KinesisDataFetcher(
-    sqlContext: SQLContext,
-    credentials: SerializableAWSCredentials,
-    endpointUrl: String,
-    regionName: String,
-    fromSeqNums: Seq[(Shard, Option[String])],
-    initialPositionInStream: InitialPositionInStream,
-    readTimeoutMs: Int = 2000
-  ) extends Serializable with Logging {
-
-  @transient  private lazy val client = new AmazonKinesisClient(credentials)
-
-  def fetch(): Array[(BlockId, SequenceNumberRange)] = {
-    sqlContext.sparkContext.makeRDD(fromSeqNums, fromSeqNums.size).map {
-      case (shard, fromSeqNum) => fetchPartition(shard, fromSeqNum)
-    }.collect().flatten
-  }
-
-  private def fetchPartition(
-      shard: Shard,
-      fromSeqNum: Option[String]): Option[(BlockId, SequenceNumberRange)] = {
-    client.setEndpoint(endpointUrl, "kinesis", regionName)
-
-    val endTime = System.currentTimeMillis + readTimeoutMs
-    def timeLeft = math.max(endTime - System.currentTimeMillis, 0)
-
-    val buffer = new ArrayBuffer[Array[Byte]]
-    var firstSeqNumber: String = null
-    var lastSeqNumber: String = fromSeqNum.orNull
-    var lastIterator: String = null
     try {
-      logDebug(s"Trying to fetch data from $shard, from seq num $lastSeqNumber")
-
-      while (timeLeft > 0) {
-        val (records, nextIterator) = retryOrTimeout("getting shard iterator", timeLeft) {
-          if (lastIterator == null) {
-            lastIterator = if (lastSeqNumber != null) {
-              getKinesisIterator(shard, ShardIteratorType.AFTER_SEQUENCE_NUMBER, lastSeqNumber)
-            } else {
-              if (initialPositionInStream == InitialPositionInStream.LATEST) {
-                getKinesisIterator(shard, ShardIteratorType.LATEST, lastSeqNumber)
-              } else {
-                getKinesisIterator(shard, ShardIteratorType.TRIM_HORIZON, lastSeqNumber)
-              }
-            }
-          }
-          getRecordsAndNextKinesisIterator(lastIterator)
+      streamNames.toSeq.flatMap { streamName =>
+        val desc = client.describeStream(streamName)
+        desc.getStreamDescription.getShards.asScala.map { s =>
+          Shard(streamName, s.getShardId)
         }
-
-        records.foreach { record =>
-          val byteBuffer = record.getData()
-          val byteArray = new Array[Byte](byteBuffer.remaining())
-          byteBuffer.get(byteArray)
-          buffer += byteArray
-          if (firstSeqNumber == null) {
-            firstSeqNumber = record.getSequenceNumber
-          }
-          lastSeqNumber = record.getSequenceNumber
-        }
-
-        lastIterator = nextIterator
-      }
-
-      if (buffer.nonEmpty) {
-        val blockId = StreamBlockId(0, Random.nextLong)
-        SparkEnv.get.blockManager.putIterator(blockId, buffer.iterator, StorageLevel.MEMORY_ONLY)
-        val range = SequenceNumberRange(
-          shard.streamName, shard.shardId, firstSeqNumber, lastSeqNumber)
-        logDebug(s"Received block $blockId having range $range from shard $shard")
-        Some(blockId -> range)
-      } else {
-        None
       }
     } catch {
-      case NonFatal(e) =>
-        logWarning(s"Error fetching data from shard $shard", e)
-        None
+      case e: AbortedException =>
+        // AbortedException will be thrown if the current thread is interrupted
+        // So let's convert it back to InterruptedException
+        val e1 = new InterruptedException("thread is interrupted")
+        e1.addSuppressed(e)
+        throw e1
     }
   }
 
+  override def toString: String = s"KinesisSource[streamNames=${streamNames.mkString(",")}]"
+}
 
-  /**
-    * Get the records starting from using a Kinesis shard iterator (which is a progress handle
-    * to get records from Kinesis), and get the next shard iterator for next consumption.
-    */
-  private def getRecordsAndNextKinesisIterator(
-      shardIterator: String): (Seq[Record], String) = {
-    val getRecordsRequest = new GetRecordsRequest
-    getRecordsRequest.setRequestCredentials(credentials)
-    getRecordsRequest.setShardIterator(shardIterator)
-    val getRecordsResult = client.getRecords(getRecordsRequest)
-    // De-aggregate records, if KPL was used in producing the records. The KCL automatically
-    // handles de-aggregation during regular operation. This code path is used during recovery
-    val records = UserRecord.deaggregate(getRecordsResult.getRecords)
-    logTrace(
-      s"Got ${records.size()} records and next iterator ${getRecordsResult.getNextShardIterator}")
-    (records.asScala, getRecordsResult.getNextShardIterator)
-  }
+private[kinesis] object KinesisSource {
 
-  /**
-    * Get the Kinesis shard iterator for getting records starting from or after the given
-    * sequence number.
-    */
-  private def getKinesisIterator(
-      shard: Shard,
-      iteratorType: ShardIteratorType,
-      sequenceNumber: String): String = {
-    val getShardIteratorRequest = new GetShardIteratorRequest
-    getShardIteratorRequest.setRequestCredentials(credentials)
-    getShardIteratorRequest.setStreamName(shard.streamName)
-    getShardIteratorRequest.setShardId(shard.shardId)
-    getShardIteratorRequest.setShardIteratorType(iteratorType.toString)
-    getShardIteratorRequest.setStartingSequenceNumber(sequenceNumber)
-    val getShardIteratorResult = client.getShardIterator(getShardIteratorRequest)
-    logTrace(s"Shard $shard: Got iterator ${getShardIteratorResult.getShardIterator}")
-    getShardIteratorResult.getShardIterator
-  }
+  private val nextId = new AtomicLong(0)
 
-  /** Helper method to retry Kinesis API request with exponential backoff and timeouts */
-  private def retryOrTimeout[T](message: String, retryTimeoutMs: Long)(body: => T): T = {
-    import KinesisSequenceRangeIterator._
-    var startTimeMs = System.currentTimeMillis()
-    var retryCount = 0
-    var waitTimeMs = MIN_RETRY_WAIT_TIME_MS
-    var result: Option[T] = None
-    var lastError: Throwable = null
-
-    def isTimedOut = (System.currentTimeMillis() - startTimeMs) >= retryTimeoutMs
-    def isMaxRetryDone = retryCount >= MAX_RETRIES
-
-    while (result.isEmpty && !isTimedOut && !isMaxRetryDone) {
-      if (retryCount > 0) {
-        // wait only if this is a retry
-        Thread.sleep(waitTimeMs)
-        waitTimeMs *= 2 // if you have waited, then double wait time for next round
-      }
-      try {
-        result = Some(body)
-      } catch {
-        case NonFatal(t) =>
-          lastError = t
-          t match {
-            case ptee: ProvisionedThroughputExceededException =>
-              logWarning(s"Error while $message [attempt = ${retryCount + 1}]", ptee)
-            case e: Throwable =>
-              throw new SparkException(s"Error while $message", e)
-          }
-      }
-      retryCount += 1
-    }
-    result.getOrElse {
-      if (isTimedOut) {
-        throw new SparkException(
-          s"Timed out after $retryTimeoutMs ms while $message, last exception: ", lastError)
-      } else {
-        throw new SparkException(
-          s"Gave up after $retryCount retries while $message, last exception: ", lastError)
-      }
-    }
-  }
+  def nextBlockId: StreamBlockId = StreamBlockId(Int.MaxValue, nextId.getAndIncrement)
 }

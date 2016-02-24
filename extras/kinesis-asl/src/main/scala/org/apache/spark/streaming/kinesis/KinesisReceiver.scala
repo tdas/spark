@@ -41,7 +41,7 @@ case class SerializableAWSCredentials(accessKeyId: String, secretKey: String)
   override def getAWSSecretKey: String = secretKey
 }
 
-object SerializableAWSCredentials {
+private[kinesis] object SerializableAWSCredentials {
   def apply(credentials: AWSCredentials): SerializableAWSCredentials = {
     new SerializableAWSCredentials(credentials.getAWSAccessKeyId, credentials.getAWSSecretKey)
   }

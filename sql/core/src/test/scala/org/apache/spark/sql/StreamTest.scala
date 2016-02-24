@@ -380,10 +380,10 @@ trait StreamTest extends QueryTest with Timeouts {
         pos += 1
       }
     } catch {
-      case _: InterruptedException if streamDeathCause != null =>
-        failTest("Stream Thread Died")
-      case _: org.scalatest.exceptions.TestFailedDueToTimeoutException =>
-        failTest("Timed out waiting for stream")
+      case e: InterruptedException if streamDeathCause != null =>
+        failTest("Stream Thread Died", e)
+      case e: org.scalatest.exceptions.TestFailedDueToTimeoutException =>
+        failTest("Timed out waiting for stream", e)
     } finally {
       if (currentStream != null && currentStream.microBatchThread.isAlive) {
         currentStream.stop()

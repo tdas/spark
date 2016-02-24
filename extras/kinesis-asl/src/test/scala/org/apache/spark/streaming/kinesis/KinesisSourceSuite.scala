@@ -17,63 +17,209 @@
 
 package org.apache.spark.streaming.kinesis
 
-
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
-import org.scalatest.time.SpanSugar._
 
-import org.apache.spark.sql.StreamTest
-import org.apache.spark.sql.execution.streaming.{Offset, Source}
+import org.apache.spark.SparkEnv
+import org.apache.spark.sql.{AnalysisException, StreamTest}
+import org.apache.spark.sql.execution.streaming.{Offset, Source, StreamingRelation}
 import org.apache.spark.sql.test.SharedSQLContext
+import org.apache.spark.storage.StreamBlockId
 
+abstract class KinesisSourceTest extends StreamTest with SharedSQLContext {
 
-class KinesisSourceSuite extends StreamTest with SharedSQLContext with KinesisFunSuite {
+  case class AddKinesisData(
+      testUtils: KPLBasedKinesisTestUtils,
+      kinesisSource: KinesisSource,
+      data: Seq[Int]) extends AddData {
 
-  import testImplicits._
-
-  private var testUtils: KPLBasedKinesisTestUtils = _
-  private var streamName: String = _
-
-  override val streamingTimout = 60.seconds
-
-  case class AddKinesisData(kinesisSource: KinesisSource, data: Int*) extends AddData {
     override def addData(): Offset = {
-      val shardIdToSeqNums = testUtils.pushData(data, false).map { case (shardId, info) =>
-        (Shard(streamName, shardId), info.last._2)
+      testUtils.pushData(data, false)
+      val shardIdToSeqNums = testUtils.getLatestSeqNumsOfShards().map { case (shardId, seqNum) =>
+        (Shard(testUtils.streamName, shardId), seqNum)
       }
-      assert(shardIdToSeqNums.size === testUtils.streamShardCount,
-        s"Data must be send to all ${testUtils.streamShardCount} shards of stream $streamName")
       KinesisSourceOffset(shardIdToSeqNums)
     }
 
     override def source: Source = kinesisSource
   }
 
-  override def beforeAll(): Unit = {
-    super.beforeAll()
-    testUtils = new KPLBasedKinesisTestUtils
-    testUtils.createStream()
-    streamName = testUtils.streamName
-  }
-
-  override def afterAll(): Unit = {
-    if (testUtils != null) {
-      testUtils.deleteStream()
-    }
-    super.afterAll()
-  }
-
-  test("basic receiving") {
-    val kinesisSource = KinesisSource(
+  def createKinesisSourceForTest(testUtils: KPLBasedKinesisTestUtils): KinesisSource = {
+    new KinesisSource(
       sqlContext,
       testUtils.regionName,
       testUtils.endpointUrl,
-      Set(streamName),
-      InitialPositionInStream.TRIM_HORIZON)
-    val mapped = kinesisSource.toDS().map[Int]((bytes: Array[Byte]) => new String(bytes).toInt + 1)
-    val testData = 1 to 10 // This ensures that data is sent to multiple shards for 2 shard streams
-    testStream(mapped)(
-      AddKinesisData(kinesisSource, testData: _*),
-      CheckAnswer(testData.map { _ + 1 }: _*)
-    )
+      Set(testUtils.streamName),
+      InitialPositionInStream.TRIM_HORIZON,
+      SerializableAWSCredentials(KinesisTestUtils.getAWSCredentials()))
+  }
+}
+
+class KinesisSourceSuite extends KinesisSourceTest with KinesisFunSuite {
+
+  import testImplicits._
+
+  testIfEnabled("basic receiving and failover") {
+    var streamBlocksInLastBatch: Seq[StreamBlockId] = Seq.empty
+
+    def assertStreamBlocks: Boolean = {
+      if (sqlContext.sparkContext.isLocal) {
+        // Only test this one in local mode so that we can assume there is only one BlockManager
+        val streamBlocks =
+          SparkEnv.get.blockManager.getMatchingBlockIds(_.isInstanceOf[StreamBlockId])
+        val cleaned = streamBlocks.intersect(streamBlocksInLastBatch).isEmpty
+        streamBlocksInLastBatch = streamBlocks.map(_.asInstanceOf[StreamBlockId])
+        cleaned
+      } else {
+        true
+      }
+    }
+
+    val testUtils = new KPLBasedKinesisTestUtils
+    testUtils.createStream()
+    try {
+      val kinesisSource = createKinesisSourceForTest(testUtils)
+      val mapped =
+        kinesisSource.toDS[Array[Byte]]().map((bytes: Array[Byte]) => new String(bytes).toInt + 1)
+      val testData = 1 to 10
+      testStream(mapped)(
+        AddKinesisData(testUtils, kinesisSource, testData),
+        CheckAnswer((1 to 10).map(_ + 1): _*),
+        Assert(assertStreamBlocks, "Old stream blocks should be cleaned"),
+        StopStream,
+        AddKinesisData(testUtils, kinesisSource, 11 to 20),
+        StartStream,
+        CheckAnswer((1 to 20).map(_ + 1): _*),
+        Assert(assertStreamBlocks, "Old stream blocks should be cleaned"),
+        AddKinesisData(testUtils, kinesisSource, 21 to 30),
+        CheckAnswer((1 to 30).map(_ + 1): _*),
+        Assert(assertStreamBlocks, "Old stream blocks should be cleaned")
+      )
+    } finally {
+      testUtils.deleteStream()
+    }
+  }
+
+  test("DataFrameReader") {
+    val df = sqlContext.read
+      .option("endpoint", KinesisTestUtils.endpointUrl)
+      .option("stream", "stream1")
+      .option("accessKey", "accessKey")
+      .option("secretKey", "secretKey")
+      .option("position", InitialPositionInStream.TRIM_HORIZON.name())
+      .kinesis().stream()
+
+    val sources = df.queryExecution.analyzed.collect {
+      case StreamingRelation(s: KinesisSource, _) => s
+    }
+    assert(sources.size === 1)
+
+    // stream
+    assertExceptionAndMessage[IllegalArgumentException](
+      "Option 'stream' must be specified.") {
+      sqlContext.read.kinesis().stream()
+    }
+    assertExceptionAndMessage[IllegalArgumentException](
+      "Option 'stream' is invalid, as stream names cannot be empty.") {
+      sqlContext.read.option("stream", "").kinesis().stream()
+    }
+    assertExceptionAndMessage[IllegalArgumentException](
+      "Option 'stream' is invalid, as stream names cannot be empty.") {
+      sqlContext.read.option("stream", "a,").kinesis().stream()
+    }
+    assertExceptionAndMessage[IllegalArgumentException](
+      "Option 'stream' is invalid, as stream names cannot be empty.") {
+      sqlContext.read.option("stream", ",a").kinesis().stream()
+    }
+
+    // region and endpoint
+    // Setting either endpoint or region is fine
+    sqlContext.read
+      .option("stream", "stream1")
+      .option("endpoint", KinesisTestUtils.endpointUrl)
+      .option("accessKey", "accessKey")
+      .option("secretKey", "secretKey")
+      .kinesis().stream()
+    sqlContext.read
+      .option("stream", "stream1")
+      .option("region", KinesisTestUtils.regionName)
+      .option("accessKey", "accessKey")
+      .option("secretKey", "secretKey")
+      .kinesis().stream()
+
+    assertExceptionAndMessage[IllegalArgumentException](
+      "Either option 'region' or option 'endpoint' must be specified.") {
+      sqlContext.read.option("stream", "stream1").kinesis().stream()
+    }
+    assertExceptionAndMessage[IllegalArgumentException](
+      s"'region'(invalid-region) doesn't match to 'endpoint'(${KinesisTestUtils.endpointUrl})") {
+      sqlContext.read
+        .option("stream", "stream1")
+        .option("region", "invalid-region")
+        .option("endpoint", KinesisTestUtils.endpointUrl)
+        .kinesis().stream()
+    }
+
+    // position
+    assertExceptionAndMessage[IllegalArgumentException](
+      "Unknown value of option 'position': invalid") {
+      sqlContext.read
+        .option("stream", "stream1")
+        .option("endpoint", KinesisTestUtils.endpointUrl)
+        .option("position", "invalid")
+        .kinesis().stream()
+    }
+
+    // accessKey and secretKey
+    assertExceptionAndMessage[IllegalArgumentException](
+      "'accessKey' is set but 'secretKey' is not found") {
+      sqlContext.read
+        .option("stream", "stream1")
+        .option("endpoint", KinesisTestUtils.endpointUrl)
+        .option("position", InitialPositionInStream.TRIM_HORIZON.name())
+        .option("accessKey", "test")
+        .kinesis().stream()
+    }
+    assertExceptionAndMessage[IllegalArgumentException](
+      "'secretKey' is set but 'accessKey' is not found") {
+      sqlContext.read
+        .option("stream", "stream1")
+        .option("endpoint", KinesisTestUtils.endpointUrl)
+        .option("position", InitialPositionInStream.TRIM_HORIZON.name())
+        .option("secretKey", "test")
+        .kinesis().stream()
+    }
+  }
+
+  test("call kinesis when not using stream") {
+    intercept[AnalysisException] {
+      sqlContext.read.kinesis().load()
+    }
+  }
+
+  private def assertExceptionAndMessage[T <: Exception : Manifest](
+      expectedMessage: String)(body: => Unit): Unit = {
+    val e = intercept[T] {
+      body
+    }
+    assert(e.getMessage.contains(expectedMessage))
+  }
+}
+
+class KinesisSourceStressTestSuite extends KinesisSourceTest with KinesisFunSuite {
+
+  import testImplicits._
+
+  testIfEnabled("kinesis source stress test") {
+    val testUtils = new KPLBasedKinesisTestUtils
+    testUtils.createStream()
+    try {
+      val kinesisSource = createKinesisSourceForTest(testUtils)
+      val ds = kinesisSource.toDS[String]().map(_.toInt + 1)
+      runStressTest(ds, data => {
+        AddKinesisData(testUtils, kinesisSource, data)
+      })
+    } finally {
+      testUtils.deleteStream()
+    }
   }
 }
