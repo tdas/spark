@@ -109,8 +109,8 @@ class KinesisSourceSuite extends KinesisSourceTest with KinesisFunSuite {
       .kinesis().stream()
 
     val sources = df.queryExecution.analyzed.collect {
-        case StreamingRelation(s: KinesisSource, _) => s
-      }
+      case StreamingRelation(s: KinesisSource, _) => s
+    }
     assert(sources.size === 1)
 
     // stream
