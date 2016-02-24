@@ -25,7 +25,7 @@ import org.apache.spark.sql.execution.streaming.{Offset, Source, StreamingRelati
 import org.apache.spark.sql.test.SharedSQLContext
 import org.apache.spark.storage.StreamBlockId
 
-class KinesisSourceTest extends StreamTest with SharedSQLContext {
+abstract class KinesisSourceTest extends StreamTest with SharedSQLContext {
 
   case class AddKinesisData(
       testUtils: KPLBasedKinesisTestUtils,
