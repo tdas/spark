@@ -104,8 +104,9 @@ private[kinesis] class KinesisSource(
 
     /** Prefetch Kinesis data from the starting seq nums */
     val prefetchedData =
-      new KinesisDataFetcher(awsCredentials, endpointUrl, fromSeqNums, initialPosInStream)
-        .fetch(sqlContext.sparkContext)
+      new KinesisDataFetcher(awsCredentials, endpointUrl, fromSeqNums.map { case (shard, seqNum) =>
+          (shard, seqNum, KinesisSource.nextBlockId)
+        }, initialPosInStream).fetch(sqlContext.sparkContext)
 
     if (prefetchedData.nonEmpty) {
       val prefetechedRanges = prefetchedData.map(_._2)
@@ -169,5 +170,5 @@ private[kinesis] object KinesisSource {
 
   private val nextId = new AtomicLong(0)
 
-  def nextBlockId: StreamBlockId = StreamBlockId(-1, nextId.getAndIncrement)
+  def nextBlockId: StreamBlockId = StreamBlockId(Int.MaxValue, nextId.getAndIncrement)
 }

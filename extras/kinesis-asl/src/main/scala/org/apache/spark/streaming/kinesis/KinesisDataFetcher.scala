@@ -25,7 +25,7 @@ import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionIn
 import com.amazonaws.services.kinesis.clientlibrary.types.UserRecord
 import com.amazonaws.services.kinesis.model._
 
-import org.apache.spark.{Logging, SparkContext, SparkEnv, SparkException}
+import org.apache.spark._
 import org.apache.spark.network.util.JavaUtils
 import org.apache.spark.storage.{BlockId, StorageLevel}
 
@@ -35,7 +35,7 @@ import org.apache.spark.storage.{BlockId, StorageLevel}
 private[kinesis] class KinesisDataFetcher(
     credentials: SerializableAWSCredentials,
     endpointUrl: String,
-    fromSeqNums: Seq[(Shard, Option[String])],
+    fromSeqNums: Seq[(Shard, Option[String], BlockId)],
     initialPositionInStream: InitialPositionInStream,
     readTimeoutMs: Long = 2000L
 ) extends Serializable with Logging {
@@ -54,7 +54,7 @@ private[kinesis] class KinesisDataFetcher(
    */
   def fetch(sc: SparkContext): Array[(BlockId, SequenceNumberRange)] = {
     sc.makeRDD(fromSeqNums, fromSeqNums.size).map {
-      case (shard, fromSeqNum) => fetchPartition(shard, fromSeqNum)
+      case (shard, fromSeqNum, blockId) => fetchPartition(shard, fromSeqNum, blockId)
     }.collect().flatten
   }
 
@@ -67,7 +67,8 @@ private[kinesis] class KinesisDataFetcher(
    */
   private def fetchPartition(
       shard: Shard,
-      fromSeqNum: Option[String]): Option[(BlockId, SequenceNumberRange)] = {
+      fromSeqNum: Option[String],
+      blockId: BlockId): Option[(BlockId, SequenceNumberRange)] = {
     client.setEndpoint(endpointUrl)
 
     val endTime = System.currentTimeMillis + readTimeoutMs
@@ -108,7 +109,6 @@ private[kinesis] class KinesisDataFetcher(
       }
 
       if (buffer.nonEmpty) {
-        val blockId = KinesisSource.nextBlockId
         SparkEnv.get.blockManager.putIterator(blockId, buffer.iterator, StorageLevel.MEMORY_ONLY)
         val range = SequenceNumberRange(
           shard.streamName, shard.shardId, firstSeqNumber, lastSeqNumber)

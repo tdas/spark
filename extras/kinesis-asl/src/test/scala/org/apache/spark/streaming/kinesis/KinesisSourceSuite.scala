@@ -62,12 +62,16 @@ class KinesisSourceSuite extends KinesisSourceTest with KinesisFunSuite {
     var streamBlocksInLastBatch: Seq[StreamBlockId] = Seq.empty
 
     def assertStreamBlocks: Boolean = {
-      // Assume the test runs in local mode and there is only one BlockManager.
-      val streamBlocks =
-        SparkEnv.get.blockManager.getMatchingBlockIds(_.isInstanceOf[StreamBlockId])
-      val cleaned = streamBlocks.intersect(streamBlocksInLastBatch).isEmpty
-      streamBlocksInLastBatch = streamBlocks.map(_.asInstanceOf[StreamBlockId])
-      cleaned
+      if (sqlContext.sparkContext.isLocal) {
+        // Only test this one in local mode so that we can assume there is only one BlockManager
+        val streamBlocks =
+          SparkEnv.get.blockManager.getMatchingBlockIds(_.isInstanceOf[StreamBlockId])
+        val cleaned = streamBlocks.intersect(streamBlocksInLastBatch).isEmpty
+        streamBlocksInLastBatch = streamBlocks.map(_.asInstanceOf[StreamBlockId])
+        cleaned
+      } else {
+        true
+      }
     }
 
     val testUtils = new KPLBasedKinesisTestUtils
