@@ -42,7 +42,7 @@ import org.apache.spark.Logging
 private[kinesis] class KinesisTestUtils extends Logging {
 
   val endpointUrl = KinesisTestUtils.endpointUrl
-  val regionName = RegionUtils.getRegionByEndpoint(endpointUrl).getName()
+  val regionName = KinesisTestUtils.regionName
   val streamShardCount = 2
 
   private val createStreamTimeoutSeconds = 300
@@ -215,6 +215,8 @@ private[kinesis] object KinesisTestUtils {
     // scalastyle:on println
     url
   }
+
+  lazy val regionName = RegionUtils.getRegionByEndpoint(endpointUrl).getName()
 
   def isAWSCredentialsPresent: Boolean = {
     Try { new DefaultAWSCredentialsProviderChain().getCredentials() }.isSuccess
