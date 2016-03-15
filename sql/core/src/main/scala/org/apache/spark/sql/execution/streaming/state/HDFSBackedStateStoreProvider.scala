@@ -41,7 +41,8 @@ import org.apache.spark.util.{CompletionIterator, Utils}
  * Usage:
  * To update the data in the state store, the following order of operations are needed.
  *
- * - val store = StateStore.get(operatorId, partitionId, version) // to get the right store
+ * - val store = StateStore.get(
+ *     StateStoreId(operatorId, partitionId), "hdfs://...", version) // to get the right store
  * - store.update(...)
  * - store.remove(...)
  * - store.commit()    // commits all the updates to made with version number
@@ -138,7 +139,7 @@ class HDFSBackedStateStoreProvider(
      * updates.
      */
     override def iterator(): Iterator[InternalRow] = {
-      verify(state == COMMITTED, "Cannot get iterator of store data before comitting")
+      verify(state == COMMITTED, "Cannot get iterator of store data before committing")
       HDFSBackedStateStoreProvider.this.iterator(newVersion)
     }
 
@@ -180,7 +181,7 @@ class HDFSBackedStateStoreProvider(
   }
 
   override def toString(): String = {
-    s"StateStore[id = (op=${id.operatorId},part=${id.partitionId}), dir = $baseDir]"
+    s"StateStore[id = (op=${id.operatorId},part=${id.partitionId}), dir=$baseDir]"
   }
 
   /* Internal classes and methods */
@@ -233,7 +234,7 @@ class HDFSBackedStateStoreProvider(
     } else {
       if (!fs.isDirectory(baseDir)) {
         throw new IllegalStateException(
-          s"Cannot use $directory for storing state data as" +
+          s"Cannot use $directory for storing state data as " +
             s"$baseDir already exists and is not a directory")
       }
     }

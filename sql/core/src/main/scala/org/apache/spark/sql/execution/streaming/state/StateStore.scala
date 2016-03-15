@@ -51,13 +51,13 @@ trait StateStore {
 
   /**
    * Remove keys that match the following condition.
-   * This can be called only after prepareForUpdates() has been called in the current thread.
+   * This can be called only after prepareForUpdates() has been called in the same thread.
    */
   def remove(condition: InternalRow => Boolean): Unit
 
   /**
    * Commit all the updates that have been made to the store.
-   * This can be called only after prepareForUpdates() has been called in the current thread.
+   * This can be called only after prepareForUpdates() has been called in the same thread.
    */
   def commit(): Long
 
@@ -66,13 +66,13 @@ trait StateStore {
 
   /**
    * Iterator of store data after a set of updates have been committed.
-   * This can be called only after commitUpdates() has been called in the current thread.
+   * This can be called only after commit() has been called in the same thread.
    */
   def iterator(): Iterator[InternalRow]
 
   /**
    * Iterator of the updates that have been committed.
-   * This can be called only after commitUpdates() has been called in the current thread.
+   * This can be called only after commit() has been called in the same thread.
    */
   def updates(): Iterator[StoreUpdate]
 
