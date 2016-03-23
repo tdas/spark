@@ -36,7 +36,13 @@ import org.apache.spark.util.NextIterator
 /** Class representing a range of Kinesis sequence numbers. Both sequence numbers are inclusive. */
 private[kinesis]
 case class SequenceNumberRange(
-    streamName: String, shardId: String, fromSeqNumber: String, toSeqNumber: String)
+    streamName: String,
+    shardId: String,
+    fromSeqNumber: String,
+    toSeqNumber: String,
+    fromInclusive: Boolean = true) {
+  def shard: Shard = Shard(streamName, shardId)
+}
 
 /** Class representing an array of Kinesis sequence number ranges */
 private[kinesis]
@@ -152,10 +158,14 @@ class KinesisSequenceRangeIterator(
     } else {
 
       if (internalIterator == null) {
-
+        val iterType = if (range.fromInclusive) {
+          ShardIteratorType.AT_SEQUENCE_NUMBER
+        } else {
+          ShardIteratorType.AFTER_SEQUENCE_NUMBER
+        }
         // If the internal iterator has not been initialized,
         // then fetch records from starting sequence number
-        internalIterator = getRecords(ShardIteratorType.AT_SEQUENCE_NUMBER, range.fromSeqNumber)
+        internalIterator = getRecords(iterType, range.fromSeqNumber)
       } else if (!internalIterator.hasNext) {
 
         // If the internal iterator does not have any more records,
