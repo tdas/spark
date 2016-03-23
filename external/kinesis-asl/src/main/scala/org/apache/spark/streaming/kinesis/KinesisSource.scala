@@ -27,7 +27,7 @@ import com.amazonaws.services.kinesis.AmazonKinesisClient
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
 
 import org.apache.spark._
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.{DataFrame, SQLContext}
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.execution.streaming.{Batch, Offset, Source}
 import org.apache.spark.sql.types.StructType
@@ -87,7 +87,22 @@ private[kinesis] class KinesisSource(
 
   override val schema: StructType = encoder.schema
 
-  override def getNextBatch(start: Option[Offset]): Option[Batch] = {
+  private var lastOffset: Option[Offset] = None
+  private var latestBatch: Batch = null
+
+  override def getOffset: Option[Offset] = {
+    getNextBatch(lastOffset).map { batch =>
+      latestBatch = batch
+      lastOffset = Some(batch.end)
+      batch.end
+    }
+  }
+
+  override def getBatch(start: Option[Offset], end: Offset): DataFrame = {
+    latestBatch.data
+  }
+
+  private def getNextBatch(start: Option[Offset]): Option[Batch] = {
     val now = System.currentTimeMillis()
     if (now - lastFetchShardsTimeMS < FETCH_SHARDS_INTERVAL_MS) {
       // Because DescribeStream has a limit of 10 transactions per second per account, we should not
