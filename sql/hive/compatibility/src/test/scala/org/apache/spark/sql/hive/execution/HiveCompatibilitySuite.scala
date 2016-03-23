@@ -23,14 +23,12 @@ import java.util.{Locale, TimeZone}
 import org.apache.spark.sql.catalyst.rules.RuleExecutor
 import org.scalatest.BeforeAndAfter
 
-import org.apache.spark.sql.SQLConf
 import org.apache.spark.sql.hive.test.TestHive
-import org.apache.spark.tags.ExtendedHiveTest
+import org.apache.spark.sql.internal.SQLConf
 
 /**
  * Runs the test cases that are included in the hive distribution.
  */
-@ExtendedHiveTest
 class HiveCompatibilitySuite extends HiveQueryFileTest with BeforeAndAfter {
   // TODO: bundle in jar files... get from classpath
   private lazy val hiveQueryDir = TestHive.getHiveFile(
@@ -57,7 +55,7 @@ class HiveCompatibilitySuite extends HiveQueryFileTest with BeforeAndAfter {
     // Enable in-memory partition pruning for testing purposes
     TestHive.setConf(SQLConf.IN_MEMORY_PARTITION_PRUNING, true)
     // Use Hive hash expression instead of the native one
-    TestHive.functionRegistry.unregisterFunction("hash")
+    TestHive.sessionState.functionRegistry.unregisterFunction("hash")
     RuleExecutor.resetTime()
   }
 
@@ -67,7 +65,7 @@ class HiveCompatibilitySuite extends HiveQueryFileTest with BeforeAndAfter {
     Locale.setDefault(originalLocale)
     TestHive.setConf(SQLConf.COLUMN_BATCH_SIZE, originalColumnBatchSize)
     TestHive.setConf(SQLConf.IN_MEMORY_PARTITION_PRUNING, originalInMemoryPartitionPruning)
-    TestHive.functionRegistry.restore()
+    TestHive.sessionState.functionRegistry.restore()
 
     // For debugging dump some statistics about how much time was spent in various optimizer rules.
     logWarning(RuleExecutor.dumpTimeSpent())
@@ -338,7 +336,12 @@ class HiveCompatibilitySuite extends HiveQueryFileTest with BeforeAndAfter {
     "udf_format_number",
     "udf_round",
     "udf_round_3",
-    "view_cast"
+    "view_cast",
+
+    // These tests check the VIEW table definition, but Spark handles CREATE VIEW itself and
+    // generates different View Expanded Text.
+    "alter_view_as_select",
+    "show_create_table_view"
   )
 
   /**
@@ -363,7 +366,6 @@ class HiveCompatibilitySuite extends HiveQueryFileTest with BeforeAndAfter {
     "alter_table_serde",
     "alter_varchar1",
     "alter_varchar2",
-    "alter_view_as_select",
     "ambiguous_col",
     "annotate_stats_join",
     "annotate_stats_limit",
@@ -835,7 +837,6 @@ class HiveCompatibilitySuite extends HiveQueryFileTest with BeforeAndAfter {
     "show_create_table_index",
     "show_create_table_partitioned",
     "show_create_table_serde",
-    "show_create_table_view",
     "show_describe_func_quotes",
     "show_functions",
     "show_partitions",

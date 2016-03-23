@@ -22,23 +22,43 @@ if sys.version > '3':
 from pyspark import since
 from pyspark.rdd import ignore_unicode_prefix
 from pyspark.ml.param.shared import *
-from pyspark.ml.util import keyword_only
+from pyspark.ml.util import keyword_only, JavaMLReadable, JavaMLWritable
 from pyspark.ml.wrapper import JavaEstimator, JavaModel, JavaTransformer, _jvm
 from pyspark.mllib.common import inherit_doc
 from pyspark.mllib.linalg import _convert_to_vector
 
-__all__ = ['Binarizer', 'Bucketizer', 'CountVectorizer', 'CountVectorizerModel', 'DCT',
-           'ElementwiseProduct', 'HashingTF', 'IDF', 'IDFModel', 'IndexToString', 'MinMaxScaler',
-           'MinMaxScalerModel', 'NGram', 'Normalizer', 'OneHotEncoder', 'PCA', 'PCAModel',
-           'PolynomialExpansion', 'QuantileDiscretizer', 'RegexTokenizer', 'RFormula',
-           'RFormulaModel', 'SQLTransformer', 'StandardScaler', 'StandardScalerModel',
-           'StopWordsRemover', 'StringIndexer', 'StringIndexerModel', 'Tokenizer',
-           'VectorAssembler', 'VectorIndexer', 'VectorSlicer', 'Word2Vec', 'Word2VecModel',
-           'ChiSqSelector', 'ChiSqSelectorModel']
+__all__ = ['Binarizer',
+           'Bucketizer',
+           'ChiSqSelector', 'ChiSqSelectorModel',
+           'CountVectorizer', 'CountVectorizerModel',
+           'DCT',
+           'ElementwiseProduct',
+           'HashingTF',
+           'IDF', 'IDFModel',
+           'IndexToString',
+           'MaxAbsScaler', 'MaxAbsScalerModel',
+           'MinMaxScaler', 'MinMaxScalerModel',
+           'NGram',
+           'Normalizer',
+           'OneHotEncoder',
+           'PCA', 'PCAModel',
+           'PolynomialExpansion',
+           'QuantileDiscretizer',
+           'RegexTokenizer',
+           'RFormula', 'RFormulaModel',
+           'SQLTransformer',
+           'StandardScaler', 'StandardScalerModel',
+           'StopWordsRemover',
+           'StringIndexer', 'StringIndexerModel',
+           'Tokenizer',
+           'VectorAssembler',
+           'VectorIndexer', 'VectorIndexerModel',
+           'VectorSlicer',
+           'Word2Vec', 'Word2VecModel']
 
 
 @inherit_doc
-class Binarizer(JavaTransformer, HasInputCol, HasOutputCol):
+class Binarizer(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -53,6 +73,11 @@ class Binarizer(JavaTransformer, HasInputCol, HasOutputCol):
     >>> params = {binarizer.threshold: -0.5, binarizer.outputCol: "vector"}
     >>> binarizer.transform(df, params).head().vector
     1.0
+    >>> binarizerPath = temp_path + "/binarizer"
+    >>> binarizer.save(binarizerPath)
+    >>> loadedBinarizer = Binarizer.load(binarizerPath)
+    >>> loadedBinarizer.getThreshold() == binarizer.getThreshold()
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -98,7 +123,7 @@ class Binarizer(JavaTransformer, HasInputCol, HasOutputCol):
 
 
 @inherit_doc
-class Bucketizer(JavaTransformer, HasInputCol, HasOutputCol):
+class Bucketizer(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -118,6 +143,11 @@ class Bucketizer(JavaTransformer, HasInputCol, HasOutputCol):
     2.0
     >>> bucketizer.setParams(outputCol="b").transform(df).head().b
     0.0
+    >>> bucketizerPath = temp_path + "/bucketizer"
+    >>> bucketizer.save(bucketizerPath)
+    >>> loadedBucketizer = Bucketizer.load(bucketizerPath)
+    >>> loadedBucketizer.getSplits() == bucketizer.getSplits()
+    True
 
     .. versionadded:: 1.3.0
     """
@@ -168,7 +198,7 @@ class Bucketizer(JavaTransformer, HasInputCol, HasOutputCol):
 
 
 @inherit_doc
-class CountVectorizer(JavaEstimator, HasInputCol, HasOutputCol):
+class CountVectorizer(JavaEstimator, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -187,8 +217,22 @@ class CountVectorizer(JavaEstimator, HasInputCol, HasOutputCol):
     |1    |[a, b, b, c, a]|(3,[0,1,2],[2.0,2.0,1.0])|
     +-----+---------------+-------------------------+
     ...
-    >>> sorted(map(str, model.vocabulary))
-    ['a', 'b', 'c']
+    >>> sorted(model.vocabulary) == ['a', 'b', 'c']
+    True
+    >>> countVectorizerPath = temp_path + "/count-vectorizer"
+    >>> cv.save(countVectorizerPath)
+    >>> loadedCv = CountVectorizer.load(countVectorizerPath)
+    >>> loadedCv.getMinDF() == cv.getMinDF()
+    True
+    >>> loadedCv.getMinTF() == cv.getMinTF()
+    True
+    >>> loadedCv.getVocabSize() == cv.getVocabSize()
+    True
+    >>> modelPath = temp_path + "/count-vectorizer-model"
+    >>> model.save(modelPath)
+    >>> loadedModel = CountVectorizerModel.load(modelPath)
+    >>> loadedModel.vocabulary == model.vocabulary
+    True
 
     .. versionadded:: 1.6.0
     """
@@ -280,7 +324,7 @@ class CountVectorizer(JavaEstimator, HasInputCol, HasOutputCol):
         return CountVectorizerModel(java_model)
 
 
-class CountVectorizerModel(JavaModel):
+class CountVectorizerModel(JavaModel, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -299,7 +343,7 @@ class CountVectorizerModel(JavaModel):
 
 
 @inherit_doc
-class DCT(JavaTransformer, HasInputCol, HasOutputCol):
+class DCT(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -321,6 +365,11 @@ class DCT(JavaTransformer, HasInputCol, HasOutputCol):
     >>> df3 = DCT(inverse=True, inputCol="resultVec", outputCol="origVec").transform(df2)
     >>> df3.head().origVec
     DenseVector([5.0, 8.0, 6.0])
+    >>> dctPath = temp_path + "/dct"
+    >>> dct.save(dctPath)
+    >>> loadedDtc = DCT.load(dctPath)
+    >>> loadedDtc.getInverse()
+    False
 
     .. versionadded:: 1.6.0
     """
@@ -366,7 +415,8 @@ class DCT(JavaTransformer, HasInputCol, HasOutputCol):
 
 
 @inherit_doc
-class ElementwiseProduct(JavaTransformer, HasInputCol, HasOutputCol):
+class ElementwiseProduct(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable,
+                         JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -382,6 +432,11 @@ class ElementwiseProduct(JavaTransformer, HasInputCol, HasOutputCol):
     DenseVector([2.0, 2.0, 9.0])
     >>> ep.setParams(scalingVec=Vectors.dense([2.0, 3.0, 5.0])).transform(df).head().eprod
     DenseVector([4.0, 3.0, 15.0])
+    >>> elementwiseProductPath = temp_path + "/elementwise-product"
+    >>> ep.save(elementwiseProductPath)
+    >>> loadedEp = ElementwiseProduct.load(elementwiseProductPath)
+    >>> loadedEp.getScalingVec() == ep.getScalingVec()
+    True
 
     .. versionadded:: 1.5.0
     """
@@ -427,7 +482,8 @@ class ElementwiseProduct(JavaTransformer, HasInputCol, HasOutputCol):
 
 
 @inherit_doc
-class HashingTF(JavaTransformer, HasInputCol, HasOutputCol, HasNumFeatures):
+class HashingTF(JavaTransformer, HasInputCol, HasOutputCol, HasNumFeatures, JavaMLReadable,
+                JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -443,6 +499,11 @@ class HashingTF(JavaTransformer, HasInputCol, HasOutputCol, HasNumFeatures):
     >>> params = {hashingTF.numFeatures: 5, hashingTF.outputCol: "vector"}
     >>> hashingTF.transform(df, params).head().vector
     SparseVector(5, {2: 1.0, 3: 1.0, 4: 1.0})
+    >>> hashingTFPath = temp_path + "/hashing-tf"
+    >>> hashingTF.save(hashingTFPath)
+    >>> loadedHashingTF = HashingTF.load(hashingTFPath)
+    >>> loadedHashingTF.getNumFeatures() == hashingTF.getNumFeatures()
+    True
 
     .. versionadded:: 1.3.0
     """
@@ -470,7 +531,7 @@ class HashingTF(JavaTransformer, HasInputCol, HasOutputCol, HasNumFeatures):
 
 
 @inherit_doc
-class IDF(JavaEstimator, HasInputCol, HasOutputCol):
+class IDF(JavaEstimator, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -480,13 +541,24 @@ class IDF(JavaEstimator, HasInputCol, HasOutputCol):
     >>> df = sqlContext.createDataFrame([(DenseVector([1.0, 2.0]),),
     ...     (DenseVector([0.0, 1.0]),), (DenseVector([3.0, 0.2]),)], ["tf"])
     >>> idf = IDF(minDocFreq=3, inputCol="tf", outputCol="idf")
-    >>> idf.fit(df).transform(df).head().idf
+    >>> model = idf.fit(df)
+    >>> model.transform(df).head().idf
     DenseVector([0.0, 0.0])
     >>> idf.setParams(outputCol="freqs").fit(df).transform(df).collect()[1].freqs
     DenseVector([0.0, 0.0])
     >>> params = {idf.minDocFreq: 1, idf.outputCol: "vector"}
     >>> idf.fit(df, params).transform(df).head().vector
     DenseVector([0.2877, 0.0])
+    >>> idfPath = temp_path + "/idf"
+    >>> idf.save(idfPath)
+    >>> loadedIdf = IDF.load(idfPath)
+    >>> loadedIdf.getMinDocFreq() == idf.getMinDocFreq()
+    True
+    >>> modelPath = temp_path + "/idf-model"
+    >>> model.save(modelPath)
+    >>> loadedModel = IDFModel.load(modelPath)
+    >>> loadedModel.transform(df).head().idf == model.transform(df).head().idf
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -534,7 +606,7 @@ class IDF(JavaEstimator, HasInputCol, HasOutputCol):
         return IDFModel(java_model)
 
 
-class IDFModel(JavaModel):
+class IDFModel(JavaModel, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -545,7 +617,87 @@ class IDFModel(JavaModel):
 
 
 @inherit_doc
-class MinMaxScaler(JavaEstimator, HasInputCol, HasOutputCol):
+class MaxAbsScaler(JavaEstimator, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
+    """
+    .. note:: Experimental
+
+    Rescale each feature individually to range [-1, 1] by dividing through the largest maximum
+    absolute value in each feature. It does not shift/center the data, and thus does not destroy
+    any sparsity.
+
+    >>> from pyspark.mllib.linalg import Vectors
+    >>> df = sqlContext.createDataFrame([(Vectors.dense([1.0]),), (Vectors.dense([2.0]),)], ["a"])
+    >>> maScaler = MaxAbsScaler(inputCol="a", outputCol="scaled")
+    >>> model = maScaler.fit(df)
+    >>> model.transform(df).show()
+    +-----+------+
+    |    a|scaled|
+    +-----+------+
+    |[1.0]| [0.5]|
+    |[2.0]| [1.0]|
+    +-----+------+
+    ...
+    >>> scalerPath = temp_path + "/max-abs-scaler"
+    >>> maScaler.save(scalerPath)
+    >>> loadedMAScaler = MaxAbsScaler.load(scalerPath)
+    >>> loadedMAScaler.getInputCol() == maScaler.getInputCol()
+    True
+    >>> loadedMAScaler.getOutputCol() == maScaler.getOutputCol()
+    True
+    >>> modelPath = temp_path + "/max-abs-scaler-model"
+    >>> model.save(modelPath)
+    >>> loadedModel = MaxAbsScalerModel.load(modelPath)
+    >>> loadedModel.maxAbs == model.maxAbs
+    True
+
+    .. versionadded:: 2.0.0
+    """
+
+    @keyword_only
+    def __init__(self, inputCol=None, outputCol=None):
+        """
+        __init__(self, inputCol=None, outputCol=None)
+        """
+        super(MaxAbsScaler, self).__init__()
+        self._java_obj = self._new_java_obj("org.apache.spark.ml.feature.MaxAbsScaler", self.uid)
+        self._setDefault()
+        kwargs = self.__init__._input_kwargs
+        self.setParams(**kwargs)
+
+    @keyword_only
+    @since("2.0.0")
+    def setParams(self, inputCol=None, outputCol=None):
+        """
+        setParams(self, inputCol=None, outputCol=None)
+        Sets params for this MaxAbsScaler.
+        """
+        kwargs = self.setParams._input_kwargs
+        return self._set(**kwargs)
+
+    def _create_model(self, java_model):
+        return MaxAbsScalerModel(java_model)
+
+
+class MaxAbsScalerModel(JavaModel, JavaMLReadable, JavaMLWritable):
+    """
+    .. note:: Experimental
+
+    Model fitted by :py:class:`MaxAbsScaler`.
+
+    .. versionadded:: 2.0.0
+    """
+
+    @property
+    @since("2.0.0")
+    def maxAbs(self):
+        """
+        Max Abs vector.
+        """
+        return self._call_java("maxAbs")
+
+
+@inherit_doc
+class MinMaxScaler(JavaEstimator, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -576,6 +728,20 @@ class MinMaxScaler(JavaEstimator, HasInputCol, HasOutputCol):
     |[2.0]| [1.0]|
     +-----+------+
     ...
+    >>> minMaxScalerPath = temp_path + "/min-max-scaler"
+    >>> mmScaler.save(minMaxScalerPath)
+    >>> loadedMMScaler = MinMaxScaler.load(minMaxScalerPath)
+    >>> loadedMMScaler.getMin() == mmScaler.getMin()
+    True
+    >>> loadedMMScaler.getMax() == mmScaler.getMax()
+    True
+    >>> modelPath = temp_path + "/min-max-scaler-model"
+    >>> model.save(modelPath)
+    >>> loadedModel = MinMaxScalerModel.load(modelPath)
+    >>> loadedModel.originalMin == model.originalMin
+    True
+    >>> loadedModel.originalMax == model.originalMax
+    True
 
     .. versionadded:: 1.6.0
     """
@@ -638,7 +804,7 @@ class MinMaxScaler(JavaEstimator, HasInputCol, HasOutputCol):
         return MinMaxScalerModel(java_model)
 
 
-class MinMaxScalerModel(JavaModel):
+class MinMaxScalerModel(JavaModel, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -666,7 +832,7 @@ class MinMaxScalerModel(JavaModel):
 
 @inherit_doc
 @ignore_unicode_prefix
-class NGram(JavaTransformer, HasInputCol, HasOutputCol):
+class NGram(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -695,6 +861,11 @@ class NGram(JavaTransformer, HasInputCol, HasOutputCol):
     Traceback (most recent call last):
         ...
     TypeError: Method setParams forces keyword arguments.
+    >>> ngramPath = temp_path + "/ngram"
+    >>> ngram.save(ngramPath)
+    >>> loadedNGram = NGram.load(ngramPath)
+    >>> loadedNGram.getN() == ngram.getN()
+    True
 
     .. versionadded:: 1.5.0
     """
@@ -739,7 +910,7 @@ class NGram(JavaTransformer, HasInputCol, HasOutputCol):
 
 
 @inherit_doc
-class Normalizer(JavaTransformer, HasInputCol, HasOutputCol):
+class Normalizer(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -756,6 +927,11 @@ class Normalizer(JavaTransformer, HasInputCol, HasOutputCol):
     >>> params = {normalizer.p: 1.0, normalizer.inputCol: "dense", normalizer.outputCol: "vector"}
     >>> normalizer.transform(df, params).head().vector
     DenseVector([0.4286, -0.5714])
+    >>> normalizerPath = temp_path + "/normalizer"
+    >>> normalizer.save(normalizerPath)
+    >>> loadedNormalizer = Normalizer.load(normalizerPath)
+    >>> loadedNormalizer.getP() == normalizer.getP()
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -800,7 +976,7 @@ class Normalizer(JavaTransformer, HasInputCol, HasOutputCol):
 
 
 @inherit_doc
-class OneHotEncoder(JavaTransformer, HasInputCol, HasOutputCol):
+class OneHotEncoder(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -833,6 +1009,11 @@ class OneHotEncoder(JavaTransformer, HasInputCol, HasOutputCol):
     >>> params = {encoder.dropLast: False, encoder.outputCol: "test"}
     >>> encoder.transform(td, params).head().test
     SparseVector(3, {0: 1.0})
+    >>> onehotEncoderPath = temp_path + "/onehot-encoder"
+    >>> encoder.save(onehotEncoderPath)
+    >>> loadedEncoder = OneHotEncoder.load(onehotEncoderPath)
+    >>> loadedEncoder.getDropLast() == encoder.getDropLast()
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -877,7 +1058,8 @@ class OneHotEncoder(JavaTransformer, HasInputCol, HasOutputCol):
 
 
 @inherit_doc
-class PolynomialExpansion(JavaTransformer, HasInputCol, HasOutputCol):
+class PolynomialExpansion(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable,
+                          JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -894,6 +1076,11 @@ class PolynomialExpansion(JavaTransformer, HasInputCol, HasOutputCol):
     DenseVector([0.5, 0.25, 2.0, 1.0, 4.0])
     >>> px.setParams(outputCol="test").transform(df).head().test
     DenseVector([0.5, 0.25, 2.0, 1.0, 4.0])
+    >>> polyExpansionPath = temp_path + "/poly-expansion"
+    >>> px.save(polyExpansionPath)
+    >>> loadedPx = PolynomialExpansion.load(polyExpansionPath)
+    >>> loadedPx.getDegree() == px.getDegree()
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -939,7 +1126,8 @@ class PolynomialExpansion(JavaTransformer, HasInputCol, HasOutputCol):
 
 
 @inherit_doc
-class QuantileDiscretizer(JavaEstimator, HasInputCol, HasOutputCol):
+class QuantileDiscretizer(JavaEstimator, HasInputCol, HasOutputCol, HasSeed, JavaMLReadable,
+                          JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -951,7 +1139,9 @@ class QuantileDiscretizer(JavaEstimator, HasInputCol, HasOutputCol):
 
     >>> df = sqlContext.createDataFrame([(0.1,), (0.4,), (1.2,), (1.5,)], ["values"])
     >>> qds = QuantileDiscretizer(numBuckets=2,
-    ...     inputCol="values", outputCol="buckets")
+    ...     inputCol="values", outputCol="buckets", seed=123)
+    >>> qds.getSeed()
+    123
     >>> bucketizer = qds.fit(df)
     >>> splits = bucketizer.getSplits()
     >>> splits[0]
@@ -961,6 +1151,11 @@ class QuantileDiscretizer(JavaEstimator, HasInputCol, HasOutputCol):
     >>> bucketed = bucketizer.transform(df).head()
     >>> bucketed.buckets
     0.0
+    >>> quantileDiscretizerPath = temp_path + "/quantile-discretizer"
+    >>> qds.save(quantileDiscretizerPath)
+    >>> loadedQds = QuantileDiscretizer.load(quantileDiscretizerPath)
+    >>> loadedQds.getNumBuckets() == qds.getNumBuckets()
+    True
 
     .. versionadded:: 2.0.0
     """
@@ -971,9 +1166,9 @@ class QuantileDiscretizer(JavaEstimator, HasInputCol, HasOutputCol):
                        "categories) into which data points are grouped. Must be >= 2. Default 2.")
 
     @keyword_only
-    def __init__(self, numBuckets=2, inputCol=None, outputCol=None):
+    def __init__(self, numBuckets=2, inputCol=None, outputCol=None, seed=None):
         """
-        __init__(self, numBuckets=2, inputCol=None, outputCol=None)
+        __init__(self, numBuckets=2, inputCol=None, outputCol=None, seed=None)
         """
         super(QuantileDiscretizer, self).__init__()
         self._java_obj = self._new_java_obj("org.apache.spark.ml.feature.QuantileDiscretizer",
@@ -987,9 +1182,9 @@ class QuantileDiscretizer(JavaEstimator, HasInputCol, HasOutputCol):
 
     @keyword_only
     @since("2.0.0")
-    def setParams(self, numBuckets=2, inputCol=None, outputCol=None):
+    def setParams(self, numBuckets=2, inputCol=None, outputCol=None, seed=None):
         """
-        setParams(self, numBuckets=2, inputCol=None, outputCol=None)
+        setParams(self, numBuckets=2, inputCol=None, outputCol=None, seed=None)
         Set the params for the QuantileDiscretizer
         """
         kwargs = self.setParams._input_kwargs
@@ -1021,7 +1216,7 @@ class QuantileDiscretizer(JavaEstimator, HasInputCol, HasOutputCol):
 
 @inherit_doc
 @ignore_unicode_prefix
-class RegexTokenizer(JavaTransformer, HasInputCol, HasOutputCol):
+class RegexTokenizer(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1049,6 +1244,13 @@ class RegexTokenizer(JavaTransformer, HasInputCol, HasOutputCol):
     Traceback (most recent call last):
         ...
     TypeError: Method setParams forces keyword arguments.
+    >>> regexTokenizerPath = temp_path + "/regex-tokenizer"
+    >>> reTokenizer.save(regexTokenizerPath)
+    >>> loadedReTokenizer = RegexTokenizer.load(regexTokenizerPath)
+    >>> loadedReTokenizer.getMinTokenLength() == reTokenizer.getMinTokenLength()
+    True
+    >>> loadedReTokenizer.getGaps() == reTokenizer.getGaps()
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -1146,7 +1348,7 @@ class RegexTokenizer(JavaTransformer, HasInputCol, HasOutputCol):
 
 
 @inherit_doc
-class SQLTransformer(JavaTransformer):
+class SQLTransformer(JavaTransformer, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1159,6 +1361,11 @@ class SQLTransformer(JavaTransformer):
     ...     statement="SELECT *, (v1 + v2) AS v3, (v1 * v2) AS v4 FROM __THIS__")
     >>> sqlTrans.transform(df).head()
     Row(id=0, v1=1.0, v2=3.0, v3=4.0, v4=3.0)
+    >>> sqlTransformerPath = temp_path + "/sql-transformer"
+    >>> sqlTrans.save(sqlTransformerPath)
+    >>> loadedSqlTrans = SQLTransformer.load(sqlTransformerPath)
+    >>> loadedSqlTrans.getStatement() == sqlTrans.getStatement()
+    True
 
     .. versionadded:: 1.6.0
     """
@@ -1202,7 +1409,7 @@ class SQLTransformer(JavaTransformer):
 
 
 @inherit_doc
-class StandardScaler(JavaEstimator, HasInputCol, HasOutputCol):
+class StandardScaler(JavaEstimator, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1219,6 +1426,20 @@ class StandardScaler(JavaEstimator, HasInputCol, HasOutputCol):
     DenseVector([1.4142])
     >>> model.transform(df).collect()[1].scaled
     DenseVector([1.4142])
+    >>> standardScalerPath = temp_path + "/standard-scaler"
+    >>> standardScaler.save(standardScalerPath)
+    >>> loadedStandardScaler = StandardScaler.load(standardScalerPath)
+    >>> loadedStandardScaler.getWithMean() == standardScaler.getWithMean()
+    True
+    >>> loadedStandardScaler.getWithStd() == standardScaler.getWithStd()
+    True
+    >>> modelPath = temp_path + "/standard-scaler-model"
+    >>> model.save(modelPath)
+    >>> loadedModel = StandardScalerModel.load(modelPath)
+    >>> loadedModel.std == model.std
+    True
+    >>> loadedModel.mean == model.mean
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -1281,7 +1502,7 @@ class StandardScaler(JavaEstimator, HasInputCol, HasOutputCol):
         return StandardScalerModel(java_model)
 
 
-class StandardScalerModel(JavaModel):
+class StandardScalerModel(JavaModel, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1308,7 +1529,8 @@ class StandardScalerModel(JavaModel):
 
 
 @inherit_doc
-class StringIndexer(JavaEstimator, HasInputCol, HasOutputCol, HasHandleInvalid):
+class StringIndexer(JavaEstimator, HasInputCol, HasOutputCol, HasHandleInvalid, JavaMLReadable,
+                    JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1328,6 +1550,21 @@ class StringIndexer(JavaEstimator, HasInputCol, HasOutputCol, HasHandleInvalid):
     >>> sorted(set([(i[0], str(i[1])) for i in itd.select(itd.id, itd.label2).collect()]),
     ...     key=lambda x: x[0])
     [(0, 'a'), (1, 'b'), (2, 'c'), (3, 'a'), (4, 'a'), (5, 'c')]
+    >>> stringIndexerPath = temp_path + "/string-indexer"
+    >>> stringIndexer.save(stringIndexerPath)
+    >>> loadedIndexer = StringIndexer.load(stringIndexerPath)
+    >>> loadedIndexer.getHandleInvalid() == stringIndexer.getHandleInvalid()
+    True
+    >>> modelPath = temp_path + "/string-indexer-model"
+    >>> model.save(modelPath)
+    >>> loadedModel = StringIndexerModel.load(modelPath)
+    >>> loadedModel.labels == model.labels
+    True
+    >>> indexToStringPath = temp_path + "/index-to-string"
+    >>> inverter.save(indexToStringPath)
+    >>> loadedInverter = IndexToString.load(indexToStringPath)
+    >>> loadedInverter.getLabels() == inverter.getLabels()
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -1357,7 +1594,7 @@ class StringIndexer(JavaEstimator, HasInputCol, HasOutputCol, HasHandleInvalid):
         return StringIndexerModel(java_model)
 
 
-class StringIndexerModel(JavaModel):
+class StringIndexerModel(JavaModel, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1376,7 +1613,7 @@ class StringIndexerModel(JavaModel):
 
 
 @inherit_doc
-class IndexToString(JavaTransformer, HasInputCol, HasOutputCol):
+class IndexToString(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1430,12 +1667,24 @@ class IndexToString(JavaTransformer, HasInputCol, HasOutputCol):
         return self.getOrDefault(self.labels)
 
 
-class StopWordsRemover(JavaTransformer, HasInputCol, HasOutputCol):
+class StopWordsRemover(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
     A feature transformer that filters out stop words from input.
     Note: null values from input array are preserved unless adding null to stopWords explicitly.
+
+    >>> df = sqlContext.createDataFrame([(["a", "b", "c"],)], ["text"])
+    >>> remover = StopWordsRemover(inputCol="text", outputCol="words", stopWords=["b"])
+    >>> remover.transform(df).head().words == ['a', 'c']
+    True
+    >>> stopWordsRemoverPath = temp_path + "/stopwords-remover"
+    >>> remover.save(stopWordsRemoverPath)
+    >>> loadedRemover = StopWordsRemover.load(stopWordsRemoverPath)
+    >>> loadedRemover.getStopWords() == remover.getStopWords()
+    True
+    >>> loadedRemover.getCaseSensitive() == remover.getCaseSensitive()
+    True
 
     .. versionadded:: 1.6.0
     """
@@ -1456,7 +1705,7 @@ class StopWordsRemover(JavaTransformer, HasInputCol, HasOutputCol):
                                             self.uid)
         stopWordsObj = _jvm().org.apache.spark.ml.feature.StopWords
         defaultStopWords = stopWordsObj.English()
-        self._setDefault(stopWords=defaultStopWords)
+        self._setDefault(stopWords=defaultStopWords, caseSensitive=False)
         kwargs = self.__init__._input_kwargs
         self.setParams(**kwargs)
 
@@ -1505,7 +1754,7 @@ class StopWordsRemover(JavaTransformer, HasInputCol, HasOutputCol):
 
 @inherit_doc
 @ignore_unicode_prefix
-class Tokenizer(JavaTransformer, HasInputCol, HasOutputCol):
+class Tokenizer(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1529,6 +1778,11 @@ class Tokenizer(JavaTransformer, HasInputCol, HasOutputCol):
     Traceback (most recent call last):
         ...
     TypeError: Method setParams forces keyword arguments.
+    >>> tokenizerPath = temp_path + "/tokenizer"
+    >>> tokenizer.save(tokenizerPath)
+    >>> loadedTokenizer = Tokenizer.load(tokenizerPath)
+    >>> loadedTokenizer.transform(df).head().tokens == tokenizer.transform(df).head().tokens
+    True
 
     .. versionadded:: 1.3.0
     """
@@ -1555,7 +1809,7 @@ class Tokenizer(JavaTransformer, HasInputCol, HasOutputCol):
 
 
 @inherit_doc
-class VectorAssembler(JavaTransformer, HasInputCols, HasOutputCol):
+class VectorAssembler(JavaTransformer, HasInputCols, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1570,6 +1824,11 @@ class VectorAssembler(JavaTransformer, HasInputCols, HasOutputCol):
     >>> params = {vecAssembler.inputCols: ["b", "a"], vecAssembler.outputCol: "vector"}
     >>> vecAssembler.transform(df, params).head().vector
     DenseVector([0.0, 1.0])
+    >>> vectorAssemblerPath = temp_path + "/vector-assembler"
+    >>> vecAssembler.save(vectorAssemblerPath)
+    >>> loadedAssembler = VectorAssembler.load(vectorAssemblerPath)
+    >>> loadedAssembler.transform(df).head().freqs == vecAssembler.transform(df).head().freqs
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -1596,7 +1855,7 @@ class VectorAssembler(JavaTransformer, HasInputCols, HasOutputCol):
 
 
 @inherit_doc
-class VectorIndexer(JavaEstimator, HasInputCol, HasOutputCol):
+class VectorIndexer(JavaEstimator, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1652,6 +1911,18 @@ class VectorIndexer(JavaEstimator, HasInputCol, HasOutputCol):
     >>> model2 = indexer.fit(df, params)
     >>> model2.transform(df).head().vector
     DenseVector([1.0, 0.0])
+    >>> vectorIndexerPath = temp_path + "/vector-indexer"
+    >>> indexer.save(vectorIndexerPath)
+    >>> loadedIndexer = VectorIndexer.load(vectorIndexerPath)
+    >>> loadedIndexer.getMaxCategories() == indexer.getMaxCategories()
+    True
+    >>> modelPath = temp_path + "/vector-indexer-model"
+    >>> model.save(modelPath)
+    >>> loadedModel = VectorIndexerModel.load(modelPath)
+    >>> loadedModel.numFeatures == model.numFeatures
+    True
+    >>> loadedModel.categoryMaps == model.categoryMaps
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -1701,7 +1972,7 @@ class VectorIndexer(JavaEstimator, HasInputCol, HasOutputCol):
         return VectorIndexerModel(java_model)
 
 
-class VectorIndexerModel(JavaModel):
+class VectorIndexerModel(JavaModel, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1730,7 +2001,7 @@ class VectorIndexerModel(JavaModel):
 
 
 @inherit_doc
-class VectorSlicer(JavaTransformer, HasInputCol, HasOutputCol):
+class VectorSlicer(JavaTransformer, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1752,6 +2023,13 @@ class VectorSlicer(JavaTransformer, HasInputCol, HasOutputCol):
     >>> vs = VectorSlicer(inputCol="features", outputCol="sliced", indices=[1, 4])
     >>> vs.transform(df).head().sliced
     DenseVector([2.3, 1.0])
+    >>> vectorSlicerPath = temp_path + "/vector-slicer"
+    >>> vs.save(vectorSlicerPath)
+    >>> loadedVs = VectorSlicer.load(vectorSlicerPath)
+    >>> loadedVs.getIndices() == vs.getIndices()
+    True
+    >>> loadedVs.getNames() == vs.getNames()
+    True
 
     .. versionadded:: 1.6.0
     """
@@ -1770,6 +2048,7 @@ class VectorSlicer(JavaTransformer, HasInputCol, HasOutputCol):
         """
         super(VectorSlicer, self).__init__()
         self._java_obj = self._new_java_obj("org.apache.spark.ml.feature.VectorSlicer", self.uid)
+        self._setDefault(indices=[], names=[])
         kwargs = self.__init__._input_kwargs
         self.setParams(**kwargs)
 
@@ -1816,7 +2095,8 @@ class VectorSlicer(JavaTransformer, HasInputCol, HasOutputCol):
 
 @inherit_doc
 @ignore_unicode_prefix
-class Word2Vec(JavaEstimator, HasStepSize, HasMaxIter, HasSeed, HasInputCol, HasOutputCol):
+class Word2Vec(JavaEstimator, HasStepSize, HasMaxIter, HasSeed, HasInputCol, HasOutputCol,
+               JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1825,7 +2105,8 @@ class Word2Vec(JavaEstimator, HasStepSize, HasMaxIter, HasSeed, HasInputCol, Has
 
     >>> sent = ("a b " * 100 + "a c " * 10).split(" ")
     >>> doc = sqlContext.createDataFrame([(sent,), (sent,)], ["sentence"])
-    >>> model = Word2Vec(vectorSize=5, seed=42, inputCol="sentence", outputCol="model").fit(doc)
+    >>> word2Vec = Word2Vec(vectorSize=5, seed=42, inputCol="sentence", outputCol="model")
+    >>> model = word2Vec.fit(doc)
     >>> model.getVectors().show()
     +----+--------------------+
     |word|              vector|
@@ -1845,6 +2126,22 @@ class Word2Vec(JavaEstimator, HasStepSize, HasMaxIter, HasSeed, HasInputCol, Has
     ...
     >>> model.transform(doc).head().model
     DenseVector([0.5524, -0.4995, -0.3599, 0.0241, 0.3461])
+    >>> word2vecPath = temp_path + "/word2vec"
+    >>> word2Vec.save(word2vecPath)
+    >>> loadedWord2Vec = Word2Vec.load(word2vecPath)
+    >>> loadedWord2Vec.getVectorSize() == word2Vec.getVectorSize()
+    True
+    >>> loadedWord2Vec.getNumPartitions() == word2Vec.getNumPartitions()
+    True
+    >>> loadedWord2Vec.getMinCount() == word2Vec.getMinCount()
+    True
+    >>> modelPath = temp_path + "/word2vec-model"
+    >>> model.save(modelPath)
+    >>> loadedModel = Word2VecModel.load(modelPath)
+    >>> loadedModel.getVectors().first().word == model.getVectors().first().word
+    True
+    >>> loadedModel.getVectors().first().vector == model.getVectors().first().vector
+    True
 
     .. versionadded:: 1.4.0
     """
@@ -1932,7 +2229,7 @@ class Word2Vec(JavaEstimator, HasStepSize, HasMaxIter, HasSeed, HasInputCol, Has
         return Word2VecModel(java_model)
 
 
-class Word2VecModel(JavaModel):
+class Word2VecModel(JavaModel, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1963,7 +2260,7 @@ class Word2VecModel(JavaModel):
 
 
 @inherit_doc
-class PCA(JavaEstimator, HasInputCol, HasOutputCol):
+class PCA(JavaEstimator, HasInputCol, HasOutputCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -1980,6 +2277,18 @@ class PCA(JavaEstimator, HasInputCol, HasOutputCol):
     DenseVector([1.648..., -4.013...])
     >>> model.explainedVariance
     DenseVector([0.794..., 0.205...])
+    >>> pcaPath = temp_path + "/pca"
+    >>> pca.save(pcaPath)
+    >>> loadedPca = PCA.load(pcaPath)
+    >>> loadedPca.getK() == pca.getK()
+    True
+    >>> modelPath = temp_path + "/pca-model"
+    >>> model.save(modelPath)
+    >>> loadedModel = PCAModel.load(modelPath)
+    >>> loadedModel.pc == model.pc
+    True
+    >>> loadedModel.explainedVariance == model.explainedVariance
+    True
 
     .. versionadded:: 1.5.0
     """
@@ -2025,7 +2334,7 @@ class PCA(JavaEstimator, HasInputCol, HasOutputCol):
         return PCAModel(java_model)
 
 
-class PCAModel(JavaModel):
+class PCAModel(JavaModel, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -2054,7 +2363,7 @@ class PCAModel(JavaModel):
 
 
 @inherit_doc
-class RFormula(JavaEstimator, HasFeaturesCol, HasLabelCol):
+class RFormula(JavaEstimator, HasFeaturesCol, HasLabelCol, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -2070,7 +2379,8 @@ class RFormula(JavaEstimator, HasFeaturesCol, HasLabelCol):
     ...     (0.0, 0.0, "a")
     ... ], ["y", "x", "s"])
     >>> rf = RFormula(formula="y ~ x + s")
-    >>> rf.fit(df).transform(df).show()
+    >>> model = rf.fit(df)
+    >>> model.transform(df).show()
     +---+---+---+---------+-----+
     |  y|  x|  s| features|label|
     +---+---+---+---------+-----+
@@ -2087,6 +2397,29 @@ class RFormula(JavaEstimator, HasFeaturesCol, HasLabelCol):
     |0.0|2.0|  b|   [2.0]|  0.0|
     |0.0|0.0|  a|   [0.0]|  0.0|
     +---+---+---+--------+-----+
+    ...
+    >>> rFormulaPath = temp_path + "/rFormula"
+    >>> rf.save(rFormulaPath)
+    >>> loadedRF = RFormula.load(rFormulaPath)
+    >>> loadedRF.getFormula() == rf.getFormula()
+    True
+    >>> loadedRF.getFeaturesCol() == rf.getFeaturesCol()
+    True
+    >>> loadedRF.getLabelCol() == rf.getLabelCol()
+    True
+    >>> modelPath = temp_path + "/rFormulaModel"
+    >>> model.save(modelPath)
+    >>> loadedModel = RFormulaModel.load(modelPath)
+    >>> loadedModel.uid == model.uid
+    True
+    >>> loadedModel.transform(df).show()
+    +---+---+---+---------+-----+
+    |  y|  x|  s| features|label|
+    +---+---+---+---------+-----+
+    |1.0|1.0|  a|[1.0,1.0]|  1.0|
+    |0.0|2.0|  b|[2.0,0.0]|  0.0|
+    |0.0|0.0|  a|[0.0,1.0]|  0.0|
+    +---+---+---+---------+-----+
     ...
 
     .. versionadded:: 1.5.0
@@ -2133,7 +2466,7 @@ class RFormula(JavaEstimator, HasFeaturesCol, HasLabelCol):
         return RFormulaModel(java_model)
 
 
-class RFormulaModel(JavaModel):
+class RFormulaModel(JavaModel, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -2144,7 +2477,8 @@ class RFormulaModel(JavaModel):
 
 
 @inherit_doc
-class ChiSqSelector(JavaEstimator, HasFeaturesCol, HasOutputCol, HasLabelCol):
+class ChiSqSelector(JavaEstimator, HasFeaturesCol, HasOutputCol, HasLabelCol, JavaMLReadable,
+                    JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -2163,6 +2497,16 @@ class ChiSqSelector(JavaEstimator, HasFeaturesCol, HasOutputCol, HasLabelCol):
     DenseVector([1.0])
     >>> model.selectedFeatures
     [3]
+    >>> chiSqSelectorPath = temp_path + "/chi-sq-selector"
+    >>> selector.save(chiSqSelectorPath)
+    >>> loadedSelector = ChiSqSelector.load(chiSqSelectorPath)
+    >>> loadedSelector.getNumTopFeatures() == selector.getNumTopFeatures()
+    True
+    >>> modelPath = temp_path + "/chi-sq-selector-model"
+    >>> model.save(modelPath)
+    >>> loadedModel = ChiSqSelectorModel.load(modelPath)
+    >>> loadedModel.selectedFeatures == model.selectedFeatures
+    True
 
     .. versionadded:: 2.0.0
     """
@@ -2220,7 +2564,7 @@ class ChiSqSelector(JavaEstimator, HasFeaturesCol, HasOutputCol, HasLabelCol):
         return ChiSqSelectorModel(java_model)
 
 
-class ChiSqSelectorModel(JavaModel):
+class ChiSqSelectorModel(JavaModel, JavaMLReadable, JavaMLWritable):
     """
     .. note:: Experimental
 
@@ -2240,9 +2584,16 @@ class ChiSqSelectorModel(JavaModel):
 
 if __name__ == "__main__":
     import doctest
+    import tempfile
+
+    import pyspark.ml.feature
     from pyspark.context import SparkContext
     from pyspark.sql import Row, SQLContext
+
     globs = globals().copy()
+    features = pyspark.ml.feature.__dict__.copy()
+    globs.update(features)
+
     # The small batch size here ensures that we see multiple batches,
     # even in these small test examples:
     sc = SparkContext("local[2]", "ml.feature tests")
@@ -2253,7 +2604,16 @@ if __name__ == "__main__":
                                Row(id=2, label="c"), Row(id=3, label="a"),
                                Row(id=4, label="a"), Row(id=5, label="c")], 2)
     globs['stringIndDf'] = sqlContext.createDataFrame(testData)
-    (failure_count, test_count) = doctest.testmod(globs=globs, optionflags=doctest.ELLIPSIS)
-    sc.stop()
+    temp_path = tempfile.mkdtemp()
+    globs['temp_path'] = temp_path
+    try:
+        (failure_count, test_count) = doctest.testmod(globs=globs, optionflags=doctest.ELLIPSIS)
+        sc.stop()
+    finally:
+        from shutil import rmtree
+        try:
+            rmtree(temp_path)
+        except OSError:
+            pass
     if failure_count:
         exit(-1)

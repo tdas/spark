@@ -25,8 +25,8 @@ import org.apache.spark.sql.catalyst.plans.logical._
 trait AnalysisTest extends PlanTest {
 
   val (caseSensitiveAnalyzer, caseInsensitiveAnalyzer) = {
-    val caseSensitiveConf = new SimpleCatalystConf(true)
-    val caseInsensitiveConf = new SimpleCatalystConf(false)
+    val caseSensitiveConf = new SimpleCatalystConf(caseSensitiveAnalysis = true)
+    val caseInsensitiveConf = new SimpleCatalystConf(caseSensitiveAnalysis = false)
 
     val caseSensitiveCatalog = new SimpleCatalog(caseSensitiveConf)
     val caseInsensitiveCatalog = new SimpleCatalog(caseInsensitiveConf)
@@ -60,7 +60,18 @@ trait AnalysisTest extends PlanTest {
       inputPlan: LogicalPlan,
       caseSensitive: Boolean = true): Unit = {
     val analyzer = getAnalyzer(caseSensitive)
-    analyzer.checkAnalysis(analyzer.execute(inputPlan))
+    val analysisAttempt = analyzer.execute(inputPlan)
+    try analyzer.checkAnalysis(analysisAttempt) catch {
+      case a: AnalysisException =>
+        fail(
+          s"""
+            |Failed to Analyze Plan
+            |$inputPlan
+            |
+            |Partial Analysis
+            |$analysisAttempt
+          """.stripMargin, a)
+    }
   }
 
   protected def assertAnalysisError(
