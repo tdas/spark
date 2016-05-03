@@ -442,14 +442,16 @@ class HDFSFileCatalog(
    * DataFrame will have the column of `something`.
    */
   private def basePaths: Set[Path] = {
-    val userDefinedBasePath = parameters.get("basePath").map(basePath => Set(new Path(basePath)))
-    userDefinedBasePath.getOrElse {
-      // If the user does not provide basePath, we will just use paths.
-      paths.toSet
-    }.map { hdfsPath =>
-      // Make the path qualified (consistent with listLeafFiles and listLeafFilesInParallel).
-      val fs = hdfsPath.getFileSystem(hadoopConf)
-      hdfsPath.makeQualified(fs.getUri, fs.getWorkingDirectory)
+    parameters.get("basePath").map(new Path(_)) match {
+      case Some(userDefinedBasePath) =>
+        val fs = userDefinedBasePath.getFileSystem(hadoopConf)
+        if (!fs.isDirectory(userDefinedBasePath)) {
+          throw new IllegalArgumentException("Option 'basePath' must be a directory")
+        }
+        Set(userDefinedBasePath.makeQualified(fs.getUri, fs.getWorkingDirectory))
+
+      case None =>
+        paths.map { path => if (leafFiles.contains(path)) path.getParent else path }.toSet
     }
   }
 
