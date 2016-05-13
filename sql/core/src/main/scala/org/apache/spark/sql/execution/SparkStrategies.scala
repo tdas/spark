@@ -31,8 +31,9 @@ import org.apache.spark.sql.execution.command._
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.exchange.ShuffleExchange
 import org.apache.spark.sql.execution.joins.{BuildLeft, BuildRight}
-import org.apache.spark.sql.execution.streaming.MemoryPlan
+import org.apache.spark.sql.execution.streaming.{Counter, CounterExec, MemoryPlan}
 import org.apache.spark.sql.internal.SQLConf
+
 
 private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
   self: SparkPlanner =>
@@ -192,26 +193,6 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           planLater(left), planLater(right), buildSide, joinType, condition) :: Nil
 
       // --- Cases where this strategy does not apply ---------------------------------------------
-
-      case _ => Nil
-    }
-  }
-
-  /**
-   * Used to plan aggregation queries that are computed incrementally as part of a
-   * [[org.apache.spark.sql.ContinuousQuery]]. Currently this rule is injected into the planner
-   * on-demand, only when planning in a [[org.apache.spark.sql.execution.streaming.StreamExecution]]
-   */
-  object StatefulAggregationStrategy extends Strategy {
-    override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
-      case PhysicalAggregation(
-        namedGroupingExpressions, aggregateExpressions, rewrittenResultExpressions, child) =>
-
-        aggregate.Utils.planStreamingAggregation(
-          namedGroupingExpressions,
-          aggregateExpressions,
-          rewrittenResultExpressions,
-          planLater(child))
 
       case _ => Nil
     }

@@ -31,4 +31,8 @@ import org.apache.spark.sql.execution.streaming.{Offset, Source}
 @Experimental
 class SourceStatus private[sql] (
     val description: String,
-    val offset: Option[Offset])
+    val offset: Option[Offset],
+    val rate: Option[Double]) {
+  override def toString(): String =
+    s"$description: $offset ${rate.map(" - " + _ + " rows / sec").getOrElse("")}"
+}

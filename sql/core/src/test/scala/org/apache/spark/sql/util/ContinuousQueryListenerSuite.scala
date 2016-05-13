@@ -19,6 +19,8 @@ package org.apache.spark.sql.util
 
 import java.util.concurrent.ConcurrentLinkedQueue
 
+import scala.util.control.NonFatal
+
 import org.scalatest.BeforeAndAfter
 import org.scalatest.PrivateMethodTester._
 import org.scalatest.concurrent.AsyncAssertions.Waiter
@@ -47,7 +49,7 @@ class ContinuousQueryListenerSuite extends StreamTest with SharedSQLContext with
     val listener = new QueryStatusCollector
     val input = MemoryStream[Int]
     withListenerAdded(listener) {
-      testStream(input.toDS)(
+      testStream(input.toDS.filter(_ < 1000))(
         StartStream(),
         Assert("Incorrect query status in onQueryStarted") {
           val status = listener.startStatus
@@ -59,7 +61,9 @@ class ContinuousQueryListenerSuite extends StreamTest with SharedSQLContext with
           // The source and sink offsets must be None as this must be called before the
           // batches have started
           assert(status.sourceStatuses(0).offset === None)
+          assert(status.sourceStatuses(0).rate === None)
           assert(status.sinkStatus.offset === CompositeOffset(None :: Nil))
+          assert(status.sinkStatus.rate === None)
 
           // No progress events or termination events
           assert(listener.progressStatuses.isEmpty)
@@ -76,7 +80,11 @@ class ContinuousQueryListenerSuite extends StreamTest with SharedSQLContext with
             assert(status != null)
             assert(status.active == true)
             assert(status.sourceStatuses(0).offset === Some(LongOffset(0)))
+            assert(status.sourceStatuses(0).rate !== None)
+            assert(status.sourceStatuses(0).rate.get > 0)
             assert(status.sinkStatus.offset === CompositeOffset.fill(LongOffset(0)))
+            assert(status.sinkStatus.rate !== None)
+            // assert(status.sinkStatus.rate.get > 0)
 
             // No termination events
             assert(listener.terminationStatus === null)
@@ -211,7 +219,13 @@ class ContinuousQueryListenerSuite extends StreamTest with SharedSQLContext with
 
   object QueryStatus {
     def apply(query: ContinuousQuery): QueryStatus = {
-      QueryStatus(query.isActive, query.exception, query.sourceStatuses, query.sinkStatus)
+      try {
+        QueryStatus(query.isActive, query.exception, query.sourceStatuses, query.sinkStatus)
+      } catch {
+        case NonFatal(e) =>
+          e.printStackTrace()
+          null
+      }
     }
   }
 }

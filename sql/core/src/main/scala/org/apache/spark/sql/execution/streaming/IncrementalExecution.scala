@@ -17,11 +17,12 @@
 
 package org.apache.spark.sql.execution.streaming
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.analysis.OutputMode
+import org.apache.spark.sql.catalyst.planning.PhysicalAggregation
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.execution.{QueryExecution, SparkPlan, SparkPlanner, UnaryExecNode}
+import org.apache.spark.sql.execution._
 
 /**
  * A variant of [[QueryExecution]] that allows the execution of the given [[LogicalPlan]]
@@ -35,15 +36,44 @@ class IncrementalExecution(
     currentBatchId: Long)
   extends QueryExecution(sparkSession, logicalPlan) {
 
-  // TODO: make this always part of planning.
-  val stateStrategy = sparkSession.sessionState.planner.StatefulAggregationStrategy :: Nil
-
   // Modified planner with stateful operations.
-  override def planner: SparkPlanner =
-    new SparkPlanner(
-      sparkSession.sparkContext,
+  override val planner =
+    new SparkPlanner(sparkSession.sparkContext,
       sparkSession.sessionState.conf,
-      stateStrategy)
+      Nil) {
+
+      override def strategies: Seq[Strategy] = {
+        Seq(CounterStrategy) ++ super.strategies
+      }
+
+      /**
+       * Used to plan aggregation queries that are computed incrementally as part of a
+       * [[org.apache.spark.sql.ContinuousQuery]]. Currently this rule is injected into the planner
+       * on-demand, only when planning in a [[StreamExecution]]
+       */
+      object StatefulAggregationStrategy extends Strategy {
+        override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+          case PhysicalAggregation(
+          namedGroupingExpressions, aggregateExpressions, rewrittenResultExpressions, child) =>
+
+            aggregate.Utils.planStreamingAggregation(
+              namedGroupingExpressions,
+              aggregateExpressions,
+              rewrittenResultExpressions,
+              planLater(child))
+
+          case _ => Nil
+        }
+      }
+
+      object CounterStrategy extends Strategy {
+        def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+          case Counter(source, child) =>
+            CounterExec(source, planLater(child)) :: Nil
+          case _ => Nil
+        }
+      }
+    }
 
   /**
    * Records the current id for a given stateful operator in the query plan as the `state`

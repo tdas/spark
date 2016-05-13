@@ -27,16 +27,19 @@ import scala.util.control.NonFatal
 import org.apache.hadoop.fs.Path
 
 import org.apache.spark.internal.Logging
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.OutputMode
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeMap}
-import org.apache.spark.sql.catalyst.plans.logical.{LocalRelation, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{LocalRelation, LogicalPlan, UnaryNode}
 import org.apache.spark.sql.catalyst.util._
-import org.apache.spark.sql.execution.QueryExecution
+import org.apache.spark.sql.execution.{QueryExecution, SparkPlan, UnaryExecNode}
+import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.util.ContinuousQueryListener
 import org.apache.spark.sql.util.ContinuousQueryListener._
-import org.apache.spark.util.{Clock, UninterruptibleThread, Utils}
+import org.apache.spark.util._
 
 /**
  * Manages the execution of a streaming Spark SQL query that is occurring in a separate thread.
@@ -125,18 +128,42 @@ class StreamExecution(
   private val offsetLog =
     new HDFSMetadataLog[CompositeOffset](sparkSession, checkpointFile("offsets"))
 
+  class RateInfo() {
+    @volatile
+    private var rowsPerSec: Option[Double] = None
+
+    @volatile
+    private var lastUpdateTime = System.currentTimeMillis
+
+    def currentRate: Option[Double] = rowsPerSec
+
+    def update(currentTime: Long, numRows: Long): Unit = {
+      rowsPerSec = Some(numRows.toDouble / (currentTime - lastUpdateTime) * 1000)
+      lastUpdateTime = currentTime
+    }
+  }
+  private val sourceToRateInfo = new scala.collection.mutable.HashMap[Source, RateInfo]
+  private val sinkRateInfo = new RateInfo()
+  uniqueSources.foreach { s => sourceToRateInfo.put(s, new RateInfo())}
+
   /** Whether the query is currently active or not */
   override def isActive: Boolean = state == ACTIVE
 
   /** Returns current status of all the sources. */
   override def sourceStatuses: Array[SourceStatus] = {
     val localAvailableOffsets = availableOffsets
-    sources.map(s => new SourceStatus(s.toString, localAvailableOffsets.get(s))).toArray
+    sources.map { s =>
+      new SourceStatus(s.toString, localAvailableOffsets.get(s), sourceToRateInfo(s).currentRate)
+    }.toArray
   }
 
   /** Returns current status of the sink. */
-  override def sinkStatus: SinkStatus =
-    new SinkStatus(sink.toString, committedOffsets.toCompositeOffset(sources))
+  override def sinkStatus: SinkStatus = {
+    new SinkStatus(
+      sink.toString,
+      committedOffsets.toCompositeOffset(sources),
+      sinkRateInfo.currentRate)
+  }
 
   /** Returns the [[ContinuousQueryException]] if the query was terminated by an exception. */
   override def exception: Option[ContinuousQueryException] = Option(streamDeathCause)
@@ -168,7 +195,6 @@ class StreamExecution(
       // so must mark this as ACTIVE first.
       state = ACTIVE
       postEvent(new QueryStarted(this)) // Assumption: Does not throw exception.
-
       // Unblock starting thread
       startLatch.countDown()
 
@@ -314,14 +340,17 @@ class StreamExecution(
         logDebug(s"Retrieving data from $source: $current -> $available")
         Some(source -> batch)
       case _ => None
-    }.toMap
+    }
+
+    val sourceCounter = new scala.collection.mutable.HashMap[Source, LongAccumulator]
 
     // A list of attributes that will need to be updated.
     var replacements = new ArrayBuffer[(Attribute, Attribute)]
+
     // Replace sources in the logical plan with data that has arrived since the last batch.
     val withNewSources = logicalPlan transform {
       case StreamingExecutionRelation(source, output) =>
-        newData.get(source).map { data =>
+        val inputPlan = newData.get(source).map { data =>
           val newPlan = data.logicalPlan
           assert(output.size == newPlan.output.size,
             s"Invalid batch: ${output.mkString(",")} != ${newPlan.output.mkString(",")}")
@@ -330,6 +359,7 @@ class StreamExecution(
         }.getOrElse {
           LocalRelation(output)
         }
+        Counter(Some(source), inputPlan)
     }
 
     // Rewire the plan to use the new attributes that were returned by the source.
@@ -341,7 +371,7 @@ class StreamExecution(
     val optimizerStart = System.nanoTime()
     lastExecution = new IncrementalExecution(
       sparkSession,
-      newPlan,
+      Counter(None, newPlan),
       outputMode,
       checkpointFile("state"),
       currentBatchId)
@@ -360,6 +390,16 @@ class StreamExecution(
       awaitBatchLockCondition.signalAll()
     } finally {
       awaitBatchLock.unlock()
+    }
+    val batchCompletionTime = System.currentTimeMillis()
+
+    lastExecution.executedPlan.collect {
+      case c @ CounterExec(sourceOption, _) =>
+        val numRows = c.metrics("numRows").value
+        sourceOption match {
+          case Some(source) => sourceToRateInfo(source).update(batchCompletionTime, numRows)
+          case None => sinkRateInfo.update(batchCompletionTime, numRows)
+        }
     }
 
     val batchTime = (System.nanoTime() - startTime).toDouble / 1000000
@@ -486,4 +526,26 @@ private[sql] object StreamExecution {
   private val nextId = new AtomicInteger()
 
   def nextName: String = s"query-${nextId.getAndIncrement}"
+
+
+}
+
+case class Counter(source: Option[Source], child: LogicalPlan) extends UnaryNode {
+  override def output: Seq[Attribute] = child.output
+
+  override def maxRows: Option[Long] = child.maxRows
+}
+
+case class CounterExec(@transient source: Option[Source], child: SparkPlan)
+  extends UnaryExecNode {
+
+  private[sql] override lazy val metrics = Map(
+    "numRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"))
+
+  override def output: Seq[Attribute] = child.output
+
+  override protected def doExecute(): RDD[InternalRow] = {
+    val numRows = longMetric("numRows")
+    child.execute().map(x => { numRows += 1 ;   x })
+  }
 }

@@ -31,4 +31,9 @@ import org.apache.spark.sql.execution.streaming.{Offset, Sink}
 @Experimental
 class SinkStatus private[sql](
     val description: String,
-    val offset: Offset)
+    val offset: Offset,
+    val rate: Option[Double]) {
+    override def toString: String = {
+        s"$description: $offset ${rate.map("-" + _ + " rows / sec").getOrElse("")}"
+    }
+}

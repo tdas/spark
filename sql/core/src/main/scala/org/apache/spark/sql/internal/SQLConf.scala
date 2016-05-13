@@ -416,7 +416,7 @@ object SQLConf {
     .doc("When true, the whole stage (of multiple operators) will be compiled into single java" +
       " method.")
     .booleanConf
-    .createWithDefault(true)
+    .createWithDefault(false)
 
   val WHOLESTAGE_MAX_NUM_FIELDS = SQLConfigBuilder("spark.sql.codegen.maxFields")
     .internal()
