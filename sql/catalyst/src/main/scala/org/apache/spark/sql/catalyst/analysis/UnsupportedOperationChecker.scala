@@ -107,8 +107,11 @@ object UnsupportedOperationChecker {
           throwError("Limits are not supported on streaming DataFrames/Datasets")
 
         case Sort(_, _, _) | SortPartitions(_, _) if subPlan.children.forall(_.isStreaming) =>
-          throwError("Sorting is not supported on streaming DataFrames/Datasets")
-
+          val subPlanHasAggregates =
+            subPlan.collect { case a@Aggregate(_, _, _) if a.isStreaming => a }.nonEmpty
+          if (!subPlanHasAggregates) {
+            throwError("Sorting is not supported on streaming DataFrames/Datasets")
+          }
         case Sample(_, _, _, _, child) if child.isStreaming =>
           throwError("Sampling is not supported on streaming DataFrames/Datasets")
 
