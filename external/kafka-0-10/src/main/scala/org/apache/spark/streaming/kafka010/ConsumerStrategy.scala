@@ -154,8 +154,9 @@ private case class SubscribePattern[K, V](
       toSeek.asScala.foreach { case (topicPartition, offset) =>
           consumer.seek(topicPartition, offset)
       }
+      logInfo("seeked")
     }
-
+    logInfo("consumer = " + consumer)
     consumer
   }
 }

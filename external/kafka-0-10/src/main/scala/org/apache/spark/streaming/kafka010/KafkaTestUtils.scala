@@ -21,19 +21,22 @@ import java.io.File
 import java.lang.{Integer => JInt}
 import java.net.InetSocketAddress
 import java.util.{Map => JMap, Properties}
-import java.util.concurrent.TimeoutException
+import java.util.concurrent.{TimeoutException, TimeUnit}
 
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
 import scala.language.postfixOps
+import scala.util.Random
 import scala.util.control.NonFatal
 
 import kafka.admin.AdminUtils
 import kafka.api.Request
-import kafka.producer.{KeyedMessage, Producer, ProducerConfig}
-import kafka.serializer.StringEncoder
 import kafka.server.{KafkaConfig, KafkaServer}
 import kafka.utils.ZkUtils
+import org.apache.kafka.clients.consumer.KafkaConsumer
+import org.apache.kafka.clients.producer._
+import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.serialization.{StringDeserializer, StringSerializer}
 import org.apache.zookeeper.server.{NIOServerCnxnFactory, ZooKeeperServer}
 
 import org.apache.spark.SparkConf
@@ -47,7 +50,7 @@ import org.apache.spark.util.Utils
  *
  * The reason to put Kafka test utility class in src is to test Python related Kafka APIs.
  */
-private[kafka010] class KafkaTestUtils extends Logging {
+class KafkaTestUtils extends Logging {
 
   // Zookeeper related configurations
   private val zkHost = "localhost"
@@ -177,17 +180,43 @@ private[kafka010] class KafkaTestUtils extends Logging {
   }
 
   /** Send the array of messages to the Kafka broker */
-  def sendMessages(topic: String, messages: Array[String]): Unit = {
-    producer = new Producer[String, String](new ProducerConfig(producerConfiguration))
-    producer.send(messages.map { new KeyedMessage[String, String](topic, _ ) }: _*)
-    producer.close()
-    producer = null
+  def sendMessages(topic: String, messages: Array[String]): Seq[(String, RecordMetadata)] = {
+    producer = new KafkaProducer[String, String](producerConfiguration)
+    val offsets = try {
+      messages.map { m =>
+        val metadata =
+          producer.send(new ProducerRecord[String, String](topic, m)).get(10, TimeUnit.SECONDS)
+          logInfo(s"\tSent $m to partition ${metadata.partition}, offset ${metadata.offset}")
+        (m, metadata)
+      }
+    } finally {
+      if (producer != null) {
+        producer.close()
+        producer = null
+      }
+    }
+    offsets
+  }
+
+  def getLatestOffsets(topics: Set[String]): Map[TopicPartition, Long] = {
+    val kc = new KafkaConsumer[String, String](consumerConfiguration)
+    logInfo("Created consumer to get latest offsets")
+    kc.subscribe(topics.asJavaCollection)
+    kc.poll(0)
+    val partitions = kc.assignment()
+    kc.pause(partitions)
+    kc.seekToEnd(partitions)
+    val offsets = partitions.asScala.map(p => p -> kc.position(p)).toMap
+    kc.close()
+    logInfo("Closed consumer to get latest offsets")
+    offsets
   }
 
   private def brokerConfiguration: Properties = {
     val props = new Properties()
     props.put("broker.id", "0")
     props.put("host.name", "localhost")
+    props.put("advertised.host.name", "localhost")
     props.put("port", brokerPort.toString)
     props.put("log.dir", Utils.createTempDir().getAbsolutePath)
     props.put("zookeeper.connect", zkAddress)
@@ -198,10 +227,21 @@ private[kafka010] class KafkaTestUtils extends Logging {
 
   private def producerConfiguration: Properties = {
     val props = new Properties()
-    props.put("metadata.broker.list", brokerAddress)
-    props.put("serializer.class", classOf[StringEncoder].getName)
+    props.put("bootstrap.servers", brokerAddress)
+    props.put("value.serializer", classOf[StringSerializer].getName)
+    props.put("key.serializer", classOf[StringSerializer].getName)
     // wait for all in-sync replicas to ack sends
-    props.put("request.required.acks", "-1")
+    props.put("acks", "all")
+    props
+  }
+
+  private def consumerConfiguration: Properties = {
+    val props = new Properties()
+    props.put("bootstrap.servers", brokerAddress)
+    props.put("group.id", "group-KafkaTestUtils-" + Random.nextInt)
+    props.put("value.deserializer", classOf[StringDeserializer].getName)
+    props.put("key.deserializer", classOf[StringDeserializer].getName)
+    props.put("enable.auto.commit", "false")
     props
   }
 

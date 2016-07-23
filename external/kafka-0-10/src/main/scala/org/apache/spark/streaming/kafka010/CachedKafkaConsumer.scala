@@ -31,7 +31,6 @@ import org.apache.spark.internal.Logging
  * Underlying consumer is not threadsafe, so neither is this,
  * but processing the same topicpartition and group id in multiple threads is usually bad anyway.
  */
-private[kafka010]
 class CachedKafkaConsumer[K, V] private(
   val groupId: String,
   val topic: String,
@@ -104,7 +103,6 @@ class CachedKafkaConsumer[K, V] private(
 
 }
 
-private[kafka010]
 object CachedKafkaConsumer extends Logging {
 
   private case class CacheKey(groupId: String, topic: String, partition: Int)
