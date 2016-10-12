@@ -184,3 +184,4 @@ class RangeStreamSourceSuite extends StreamTest with SharedSQLContext with Befor
     }
   }
 }
+
