@@ -219,6 +219,160 @@ class KeyValueGroupedDataset[K, V] private[sql](
   }
 
   /**
+   * ::Experimental::
+   * (Scala-specific)
+   * Applies the given function to each group of data, while using an additional keyed state.
+   * For each unique group, the function will be passed the group key and an iterator that contains
+   * all of the elements in the group. The function can return an object of arbitrary type, and
+   * optionally update or remove the corresponding state. The returned object will form a new
+   * [[Dataset]].
+   *
+   * This function can be applied on both batch and streaming Datasets. With a streaming dataset,
+   * this function will be once for each in every trigger. For each key, the updated state from the
+   * function call in a trigger will be the state available in the function call in the next
+   * trigger. However, for batch, `mapGroupsWithState` behaves exactly as `mapGroups` and the
+   * function is called only once per key without any prior state.
+   *
+   * There is no guaranteed ordering of values in the iterator in the function.
+   *
+   * This function does not support partial aggregation, and as a result requires shuffling all
+   * the data in the [[Dataset]].
+   *
+   * Internally, the implementation will spill to disk if any given group is too large to fit into
+   * memory.  However, users must take care to avoid materializing the whole iterator for a group
+   * (for example, by calling `toList`) unless they are sure that this is possible given the memory
+   * constraints of their cluster.
+   *
+   * @see [[State]] for more details of how to update/remove state in the function.
+   * @since 2.1.1
+   */
+  @Experimental
+  @InterfaceStability.Evolving
+  def mapGroupsWithState[STATE: Encoder, OUT: Encoder](
+      func: (K, Iterator[V], State[STATE]) => OUT): Dataset[OUT] = {
+    val f = (key: K, it: Iterator[V], s: State[STATE]) => Iterator(func(key, it, s))
+    flatMapGroupsWithState[STATE, OUT](f)
+  }
+
+  /**
+   * ::Experimental::
+   * (Java-specific)
+   * Applies the given function to each group of data, while using an additional keyed state.
+   * For each unique group, the function will be passed the group key and an iterator that contains
+   * all of the elements in the group. The function can return an object of arbitrary type, and
+   * optionally update or remove the corresponding state. The returned object will form a new
+   * [[Dataset]].
+   *
+   * This function can be applied on both batch and streaming Datasets. With a streaming dataset,
+   * this function will be once for each in every trigger. For each key, the updated state from the
+   * function call in a trigger will be the state available in the function call in the next
+   * trigger. However, for batch, `mapGroupsWithState` behaves exactly as `mapGroups` and the
+   * function is called only once per key without any prior state.
+   *
+   * There is no guaranteed ordering of values in the iterator in the function.
+   *
+   * This function does not support partial aggregation, and as a result requires shuffling all
+   * the data in the [[Dataset]].
+   *
+   * Internally, the implementation will spill to disk if any given group is too large to fit into
+   * memory.  However, users must take care to avoid materializing the whole iterator for a group
+   * (for example, by calling `toList`) unless they are sure that this is possible given the memory
+   * constraints of their cluster.
+   *
+   * @see [[State]] for more details of how to update/remove state in the function.
+   * @since 2.1.1
+   */
+  @Experimental
+  @InterfaceStability.Evolving
+  def mapGroupsWithState[STATE, OUT](
+      func: MapGroupsWithStateFunction[K, V, STATE, OUT],
+      stateEncoder: Encoder[STATE],
+      outputEncoder: Encoder[OUT]): Dataset[OUT] = {
+    val f = (key: K, it: Iterator[V], s: State[STATE]) => Iterator(func.call(key, it.asJava, s))
+    flatMapGroupsWithState[STATE, OUT](f)(stateEncoder, outputEncoder)
+  }
+
+
+  /**
+   * ::Experimental::
+   * (Scala-specific)
+   * Applies the given function to each group of data, while using an additional keyed state.
+   * For each unique group, the function will be passed the group key and an iterator that contains
+   * all of the elements in the group. The function can return an iteratior of object of arbitrary
+   * type, and optionally update or remove the corresponding state. The returned object will form a
+   * new [[Dataset]].
+   *
+   * This function can be applied on both batch and streaming Datasets. With a streaming dataset,
+   * this function will be once for each in every trigger. For each key, the updated state from the
+   * function call in a trigger will be the state available in the function call in the next
+   * trigger. However, for batch, `mapGroupsWithState` behaves exactly as `mapGroups` and the
+   * function is called only once per key without any prior state.
+   *
+   * There is no guaranteed ordering of values in the iterator in the function.
+   *
+   * This function does not support partial aggregation, and as a result requires shuffling all
+   * the data in the [[Dataset]].
+   *
+   * Internally, the implementation will spill to disk if any given group is too large to fit into
+   * memory.  However, users must take care to avoid materializing the whole iterator for a group
+   * (for example, by calling `toList`) unless they are sure that this is possible given the memory
+   * constraints of their cluster.
+   *
+   * @see [[State]] for more details of how to update/remove state in the function.
+   * @since 2.1.1
+   */
+  @Experimental
+  @InterfaceStability.Evolving
+  def flatMapGroupsWithState[STATE: Encoder, OUT: Encoder](
+      func: (K, Iterator[V], State[STATE]) => Iterator[OUT]): Dataset[OUT] = {
+    Dataset[OUT](
+      sparkSession,
+      MapGroupsWithState[K, V, STATE, OUT](
+        func.asInstanceOf[(Any, Iterator[Any], LogicalState[Any]) => Iterator[Any]],
+        groupingAttributes,
+        dataAttributes,
+        logicalPlan))
+  }
+
+  /**
+   * ::Experimental::
+   * (Java-specific)
+   * Applies the given function to each group of data, while using an additional keyed state.
+   * For each unique group, the function will be passed the group key and an iterator that contains
+   * all of the elements in the group. The function can return an iteratior of object of arbitrary
+   * type, and optionally update or remove the corresponding state. The returned object will form a
+   * new [[Dataset]].
+   *
+   * This function can be applied on both batch and streaming Datasets. With a streaming dataset,
+   * this function will be once for each in every trigger. For each key, the updated state from the
+   * function call in a trigger will be the state available in the function call in the next
+   * trigger. However, for batch, `mapGroupsWithState` behaves exactly as `flatMapGroups` and the
+   * function is called only once per key without any prior state.
+   *
+   * There is no guaranteed ordering of values in the iterator in the function.
+   *
+   * This function does not support partial aggregation, and as a result requires shuffling all
+   * the data in the [[Dataset]].
+   *
+   * Internally, the implementation will spill to disk if any given group is too large to fit into
+   * memory.  However, users must take care to avoid materializing the whole iterator for a group
+   * (for example, by calling `toList`) unless they are sure that this is possible given the memory
+   * constraints of their cluster.
+   *
+   * @see [[State]] for more details of how to update/remove state in the function.
+   * @since 2.1.1
+   */
+  @Experimental
+  @InterfaceStability.Evolving
+  def flatMapGroupsWithState[STATE, OUT](
+      func: FlatMapGroupsWithStateFunction[K, V, STATE, OUT],
+      stateEncoder: Encoder[STATE],
+      outputEncoder: Encoder[OUT]): Dataset[OUT] = {
+    val f = (key: K, it: Iterator[V], s: State[STATE]) => func.call(key, it.asJava, s).asScala
+    flatMapGroupsWithState[STATE, OUT](f)(stateEncoder, outputEncoder)
+  }
+
+  /**
    * (Scala-specific)
    * Reduces the elements of each group of data using the specified binary function.
    * The given function must be commutative and associative or the result may be non-deterministic.

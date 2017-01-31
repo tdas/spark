@@ -313,6 +313,42 @@ case class MapGroups(
     outputObjAttr: Attribute,
     child: LogicalPlan) extends UnaryNode with ObjectProducer
 
+/** Internal class representing State */
+trait LogicalState[S]
+
+/** Factory for constructing new `MapGroups` nodes. */
+object MapGroupsWithState {
+  def apply[K: Encoder, V: Encoder, S: Encoder, U: Encoder](
+      func: (Any, Iterator[Any], LogicalState[Any]) => Iterator[Any],
+      groupingAttributes: Seq[Attribute],
+      dataAttributes: Seq[Attribute],
+      child: LogicalPlan): LogicalPlan = {
+    val mapped = new MapGroupsWithState(
+      func,
+      UnresolvedDeserializer(encoderFor[K].deserializer, groupingAttributes),
+      UnresolvedDeserializer(encoderFor[V].deserializer, dataAttributes),
+      groupingAttributes,
+      dataAttributes,
+      CatalystSerde.generateObjAttr[U],
+      encoderFor[S].resolveAndBind().deserializer,
+      encoderFor[S].namedExpressions,
+      child)
+    CatalystSerde.serialize[U](mapped)
+  }
+}
+
+case class MapGroupsWithState(
+    func: (Any, Iterator[Any], LogicalState[Any]) => Iterator[Any],
+    keyDeserializer: Expression,
+    valueDeserializer: Expression,
+    groupingAttributes: Seq[Attribute],
+    dataAttributes: Seq[Attribute],
+    outputObjAttr: Attribute,
+    stateDeserializer: Expression,
+    stateSerializer: Seq[NamedExpression],
+    child: LogicalPlan) extends UnaryNode with ObjectProducer
+
+
 /** Factory for constructing new `FlatMapGroupsInR` nodes. */
 object FlatMapGroupsInR {
   def apply(
