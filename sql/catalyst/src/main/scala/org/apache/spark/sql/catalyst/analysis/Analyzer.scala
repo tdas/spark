@@ -2576,11 +2576,8 @@ object CleanupAliases extends Rule[LogicalPlan] {
       Window(cleanedWindowExprs, partitionSpec.map(trimAliases),
         orderSpec.map(trimAliases(_).asInstanceOf[SortOrder]), child)
 
-    // Operators that operate on objects should only have expressions from encoders, which should
-    // never have extra aliases.
-    case o: ObjectConsumer => o
-    case o: ObjectProducer => o
-    case a: AppendColumns => a
+    // Do not eliminate aliases in plans that generate named output for its correct operation
+    case p: HasNamedOutput => p
 
     case other =>
       other transformExpressionsDown {

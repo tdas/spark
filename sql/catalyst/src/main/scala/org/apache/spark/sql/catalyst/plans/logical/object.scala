@@ -52,7 +52,7 @@ object CatalystSerde {
  * A trait for logical operators that produces domain objects as output.
  * The output of this operator is a single-field safe row containing the produced object.
  */
-trait ObjectProducer extends LogicalPlan {
+trait ObjectProducer extends LogicalPlan with HasNamedOutput {
   // The attribute that reference to the single object field this operator outputs.
   def outputObjAttr: Attribute
 
@@ -65,7 +65,7 @@ trait ObjectProducer extends LogicalPlan {
  * A trait for logical operators that consumes domain objects as input.
  * The output of its child must be a single-field row containing the input object.
  */
-trait ObjectConsumer extends UnaryNode {
+trait ObjectConsumer extends UnaryNode with HasNamedOutput {
   assert(child.output.length == 1)
 
   // This operator always need all columns of its child, even it doesn't reference to.
@@ -298,7 +298,7 @@ case class AppendColumns(
     argumentSchema: StructType,
     deserializer: Expression,
     serializer: Seq[NamedExpression],
-    child: LogicalPlan) extends UnaryNode {
+    child: LogicalPlan) extends UnaryNode with HasNamedOutput {
 
   override def output: Seq[Attribute] = child.output ++ newColumns
 

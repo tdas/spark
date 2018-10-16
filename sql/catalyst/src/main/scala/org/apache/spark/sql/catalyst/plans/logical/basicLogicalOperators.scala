@@ -974,3 +974,10 @@ case class Deduplicate(
 
   override def output: Seq[Attribute] = child.output
 }
+
+/**
+ * A trait to represent the plans having named output expressions (e.g. aliases) that should
+ * be preserved through analysis. This is used to whitelist plans from rules that eliminate
+ * unused name expressions (e.g. CleanupAliases).
+ */
+trait HasNamedOutput extends LogicalPlan
